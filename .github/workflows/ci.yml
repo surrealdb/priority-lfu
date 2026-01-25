@@ -10,8 +10,8 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_STABLE: "1.84.0"
-  RUST_NIGHTLY: "nightly-2025-01-20"
+  RUST_STABLE: "1.91.0"
+  RUST_NIGHTLY: "nightly-2025-07-30"
 
 jobs:
   clippy:
