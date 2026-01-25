@@ -15,8 +15,8 @@ use std::hash::Hash;
 /// }
 /// ```
 pub trait CacheKey: Hash + Eq + Clone + Send + Sync + 'static {
-    /// The value type associated with this key.
-    type Value: CacheValue;
+	/// The value type associated with this key.
+	type Value: CacheValue;
 }
 
 /// Trait for cacheable values.
@@ -48,18 +48,18 @@ pub trait CacheKey: Hash + Eq + Clone + Send + Sync + 'static {
 /// }
 /// ```
 pub trait CacheValue: Send + Sync + 'static {
-    /// Memory footprint in bytes. Called once on insertion.
-    ///
-    /// This should account for heap-allocated memory owned by the value.
-    /// For simple types, use `std::mem::size_of::<Self>()`.
-    /// For complex types with heap allocations (Vec, String, etc.),
-    /// add their capacity to the total.
-    fn deep_size(&self) -> usize;
+	/// Memory footprint in bytes. Called once on insertion.
+	///
+	/// This should account for heap-allocated memory owned by the value.
+	/// For simple types, use `std::mem::size_of::<Self>()`.
+	/// For complex types with heap allocations (Vec, String, etc.),
+	/// add their capacity to the total.
+	fn deep_size(&self) -> usize;
 
-    /// Eviction priority. Higher weight = more resistant to eviction.
-    ///
-    /// This is *not* the memory size—it's a logical priority.
-    /// When the cache is full, items with lower `weight() / frequency` ratios
-    /// are evicted first.
-    fn weight(&self) -> u64;
+	/// Eviction priority. Higher weight = more resistant to eviction.
+	///
+	/// This is *not* the memory size—it's a logical priority.
+	/// When the cache is full, items with lower `weight() / frequency` ratios
+	/// are evicted first.
+	fn weight(&self) -> u64;
 }

@@ -97,16 +97,16 @@
 //! }
 //! ```
 
-mod traits;
+mod builder;
+mod cache;
 mod erased;
-mod sketch;
+mod guard;
 mod segments;
 mod shard;
-mod guard;
-mod cache;
-mod builder;
+mod sketch;
+mod traits;
 
-pub use traits::{CacheKey, CacheValue};
+pub use builder::CacheBuilder;
 pub use cache::Cache;
 pub use guard::Guard;
-pub use builder::CacheBuilder;
+pub use traits::{CacheKey, CacheValue};
