@@ -1,5 +1,5 @@
 use proptest::prelude::*;
-use weighted_cache::{Cache, CacheKey, CacheValue};
+use weighted_cache::{Cache, CacheKey, CacheValue, DeepSizeOf};
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
 struct TestKey(u64);
@@ -8,7 +8,7 @@ impl CacheKey for TestKey {
 	type Value = TestValue;
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, DeepSizeOf)]
 struct TestValue {
 	size: usize,
 	weight: u64,

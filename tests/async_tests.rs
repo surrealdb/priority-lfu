@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use tokio;
 /// Tests for async usage patterns.
-use weighted_cache::{Cache, CacheKey, CacheValue};
+use weighted_cache::{Cache, CacheKey, CacheValue, DeepSizeOf};
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
 struct AsyncKey(u64);
@@ -11,7 +11,7 @@ impl CacheKey for AsyncKey {
 	type Value = AsyncValue;
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, DeepSizeOf)]
 struct AsyncValue {
 	data: String,
 }

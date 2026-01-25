@@ -4,7 +4,7 @@ use crate::cache::Cache;
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
 /// use weighted_cache::CacheBuilder;
 ///
 /// let cache = CacheBuilder::new(1024 * 1024 * 512) // 512 MB
@@ -68,11 +68,7 @@ impl CacheBuilder {
 	/// Build the cache with the configured settings.
 	pub fn build(self) -> Cache {
 		let shard_count = self.shard_count.unwrap_or(64);
-
-		// For now, we use the simplified Cache::with_shards constructor
-		// In a full implementation, we'd pass all the custom percentages
-		// TODO: Extend Cache to accept custom window/protected percentages
-		Cache::with_shards(self.max_size, shard_count)
+		Cache::with_config(self.max_size, shard_count, self.window_percent, self.protected_percent)
 	}
 }
 
@@ -115,5 +111,18 @@ mod tests {
 	#[should_panic(expected = "protected_percent must be between")]
 	fn test_builder_invalid_protected_percent() {
 		CacheBuilder::new(1024).protected_percent(0.3).build();
+	}
+
+	#[test]
+	fn test_builder_full_config() {
+		// Test that custom percentages are accepted and cache is created
+		let cache = CacheBuilder::new(10240)
+			.shards(32)
+			.window_percent(0.02)
+			.protected_percent(0.75)
+			.build();
+
+		assert!(cache.is_empty());
+		assert_eq!(cache.size(), 0);
 	}
 }

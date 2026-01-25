@@ -166,6 +166,8 @@ impl Entry {
 
 #[cfg(test)]
 mod tests {
+	use deepsize::DeepSizeOf;
+
 	use super::*;
 
 	#[derive(Hash, Eq, PartialEq, Clone, Debug)]
@@ -175,15 +177,12 @@ mod tests {
 		type Value = TestValue;
 	}
 
+	#[derive(DeepSizeOf)]
 	struct TestValue {
 		data: Vec<u8>,
 	}
 
 	impl CacheValue for TestValue {
-		fn deep_size(&self) -> usize {
-			std::mem::size_of::<Self>() + self.data.capacity()
-		}
-
 		fn weight(&self) -> u64 {
 			50
 		}
@@ -192,7 +191,7 @@ mod tests {
 	#[test]
 	fn test_erased_key_creation() {
 		let key = TestKey(42);
-		let erased = ErasedKey::new(key);
+		let erased = ErasedKey::new(&key);
 
 		assert_eq!(erased.type_id, TypeId::of::<TestKey>());
 		assert!(erased.downcast_ref::<TestKey>().is_some());

@@ -8,6 +8,7 @@ parking_lot = "0.12"
 crossbeam-queue = "0.3"
 indexmap = "2"
 ahash = "0.8"
+deepsize = "0.2"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }

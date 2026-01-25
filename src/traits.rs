@@ -1,14 +1,27 @@
 use std::hash::Hash;
 
+use deepsize::DeepSizeOf;
+
 /// Marker trait for cache keys. Associates a key type with its value type.
 ///
 /// # Example
 ///
 /// ```
-/// use weighted_cache::CacheKey;
+/// use weighted_cache::{DeepSizeOf, CacheKey, CacheValue};
 ///
 /// #[derive(Hash, Eq, PartialEq, Clone)]
 /// struct UserId(u64);
+///
+/// #[derive(Clone, Debug, PartialEq, DeepSizeOf)]
+/// struct UserData {
+///     name: String,
+/// }
+///
+/// impl CacheValue for UserData {
+///     fn weight(&self) -> u64 {
+///         100
+///     }
+/// }
 ///
 /// impl CacheKey for UserId {
 ///     type Value = UserData;
@@ -26,8 +39,9 @@ pub trait CacheKey: Hash + Eq + Clone + Send + Sync + 'static {
 /// # Example
 ///
 /// ```
-/// use weighted_cache::CacheValue;
+/// use weighted_cache::{DeepSizeOf, CacheValue};
 ///
+/// #[derive(Clone, Debug, PartialEq, DeepSizeOf)]
 /// struct UserData {
 ///     name: String,
 ///     email: String,
@@ -47,14 +61,16 @@ pub trait CacheKey: Hash + Eq + Clone + Send + Sync + 'static {
 ///     }
 /// }
 /// ```
-pub trait CacheValue: Send + Sync + 'static {
+pub trait CacheValue: DeepSizeOf + Send + Sync + 'static {
 	/// Memory footprint in bytes. Called once on insertion.
 	///
 	/// This should account for heap-allocated memory owned by the value.
 	/// For simple types, use `std::mem::size_of::<Self>()`.
 	/// For complex types with heap allocations (Vec, String, etc.),
 	/// add their capacity to the total.
-	fn deep_size(&self) -> usize;
+	fn deep_size(&self) -> usize {
+		DeepSizeOf::deep_size_of(self)
+	}
 
 	/// Eviction priority. Higher weight = more resistant to eviction.
 	///

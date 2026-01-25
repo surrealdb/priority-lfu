@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::thread;
 
-use weighted_cache::{Cache, CacheBuilder, CacheKey, CacheValue};
+use weighted_cache::{Cache, CacheBuilder, CacheKey, CacheValue, DeepSizeOf};
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
 struct StringKey(String);
@@ -10,7 +10,7 @@ impl CacheKey for StringKey {
 	type Value = StringValue;
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, DeepSizeOf)]
 struct StringValue {
 	data: String,
 }
@@ -32,7 +32,7 @@ impl CacheKey for IntKey {
 	type Value = IntValue;
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, DeepSizeOf)]
 struct IntValue(i64);
 
 impl CacheValue for IntValue {
@@ -308,13 +308,14 @@ fn test_weighted_eviction() {
 		type Value = HighWeightValue;
 	}
 
-	#[derive(Clone, Debug, PartialEq)]
+	#[derive(Clone, Debug, PartialEq, DeepSizeOf)]
 	struct HighWeightValue;
 
 	impl CacheValue for HighWeightValue {
 		fn deep_size(&self) -> usize {
 			100
 		}
+
 		fn weight(&self) -> u64 {
 			1000 // Very high weight
 		}
@@ -328,7 +329,7 @@ fn test_weighted_eviction() {
 		type Value = LowWeightValue;
 	}
 
-	#[derive(Clone, Debug, PartialEq)]
+	#[derive(Clone, Debug, PartialEq, DeepSizeOf)]
 	struct LowWeightValue;
 
 	impl CacheValue for LowWeightValue {

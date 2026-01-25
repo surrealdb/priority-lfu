@@ -58,18 +58,35 @@ impl Cache {
 	/// More shards reduce contention but increase memory overhead.
 	/// Recommended: `num_cpus * 8` to `num_cpus * 16`.
 	pub fn with_shards(max_size_bytes: usize, shard_count: usize) -> Self {
+		Self::with_config(max_size_bytes, shard_count, 0.01, 0.80)
+	}
+
+	/// Create with full custom configuration.
+	///
+	/// # Arguments
+	///
+	/// * `max_size_bytes` - Maximum cache size in bytes
+	/// * `shard_count` - Number of shards (will be rounded to next power of 2)
+	/// * `window_percent` - Window size as percentage of total capacity (e.g., 0.01 = 1%)
+	/// * `protected_percent` - Protected segment as percentage of main cache (e.g., 0.80 = 80%)
+	///
+	/// This is primarily used by `CacheBuilder`. Most users should use `new()` or `with_shards()`.
+	pub fn with_config(
+		max_size_bytes: usize,
+		shard_count: usize,
+		window_percent: f32,
+		protected_percent: f32,
+	) -> Self {
 		// Ensure shard_count is a power of 2 for efficient masking
 		let shard_count = shard_count.next_power_of_two().max(4);
 
 		// Distribute capacity across segments
-		let window_percent = 0.01; // 1%
-		let probationary_percent = 0.20; // 20% of main (not total)
-		let protected_percent = 0.80; // 80% of main (not total)
+		let probationary_percent = 1.0 - protected_percent; // Remaining portion of main cache
 
-		let window_size = (max_size_bytes as f64 * window_percent) as usize;
+		let window_size = (max_size_bytes as f64 * window_percent as f64) as usize;
 		let main_size = max_size_bytes - window_size;
-		let probationary_size = (main_size as f64 * probationary_percent) as usize;
-		let protected_size = (main_size as f64 * protected_percent) as usize;
+		let probationary_size = (main_size as f64 * probationary_percent as f64) as usize;
+		let protected_size = (main_size as f64 * protected_percent as f64) as usize;
 
 		// Divide per shard
 		let window_per_shard = window_size / shard_count;
@@ -340,6 +357,8 @@ unsafe impl Sync for Cache {}
 
 #[cfg(test)]
 mod tests {
+	use deepsize::DeepSizeOf;
+
 	use super::*;
 	use crate::traits::CacheValue;
 
@@ -350,7 +369,7 @@ mod tests {
 		type Value = TestValue;
 	}
 
-	#[derive(Clone, Debug, PartialEq)]
+	#[derive(Clone, Debug, PartialEq, DeepSizeOf)]
 	struct TestValue {
 		data: String,
 	}

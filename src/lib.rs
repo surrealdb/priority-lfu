@@ -10,7 +10,7 @@
 //! ## Quick Start
 //!
 //! ```rust
-//! use weighted_cache::{Cache, CacheKey, CacheValue};
+//! use weighted_cache::{DeepSizeOf, Cache, CacheKey, CacheValue};
 //! use std::sync::Arc;
 //!
 //! // Define your key type
@@ -18,6 +18,7 @@
 //! struct UserId(u64);
 //!
 //! // Define your value type
+//! #[derive(Clone, Debug, PartialEq, DeepSizeOf)]
 //! struct UserProfile {
 //!     name: String,
 //!     email: String,
@@ -108,5 +109,6 @@ mod traits;
 
 pub use builder::CacheBuilder;
 pub use cache::Cache;
+pub use deepsize::DeepSizeOf;
 pub use guard::Guard;
 pub use traits::{CacheKey, CacheValue};

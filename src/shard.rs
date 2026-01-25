@@ -302,6 +302,8 @@ pub struct EvictionCandidate {
 
 #[cfg(test)]
 mod tests {
+	use deepsize::DeepSizeOf;
+
 	use super::*;
 	use crate::traits::{CacheKey, CacheValue};
 
@@ -312,6 +314,7 @@ mod tests {
 		type Value = TestValue;
 	}
 
+	#[derive(DeepSizeOf)]
 	struct TestValue {
 		size: usize,
 		weight: u64,
