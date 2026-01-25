@@ -104,3 +104,5 @@ pub use cache::Cache;
 pub use deepsize::DeepSizeOf;
 pub use guard::Guard;
 pub use traits::CacheKey;
+
+pub use deepsize;
