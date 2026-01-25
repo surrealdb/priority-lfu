@@ -1,0 +1,32 @@
+[package]
+name = "weighted-cache"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+description = "A high-performance, concurrent, in-memory cache with W-TinyLFU eviction policy and weight-based prioritization."
+documentation = "https://docs.rs/weighted-cache/"
+keywords = ["cache", "weighted", "tinylfu", "lfu", "eviction", "priority"]
+categories = ["caching"]
+
+[dependencies]
+parking_lot.workspace = true
+crossbeam-queue.workspace = true
+indexmap.workspace = true
+ahash.workspace = true
+deepsize.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+criterion.workspace = true
+proptest.workspace = true
+trybuild.workspace = true
+
+[[bench]]
+name = "cache_benchmark"
+harness = false
+
+[lints]
+workspace = true

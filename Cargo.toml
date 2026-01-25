@@ -1,35 +1,35 @@
-[package]
-name = "weighted-cache"
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 authors = ["Stu Schwartz <stu.schwartz@surrealdb.com>"]
-description = "A high-performance, concurrent, in-memory cache with W-TinyLFU eviction policy and weight-based prioritization."
 repository = "https://github.com/surrealdb/weighted-cache"
 homepage = "https://github.com/surrealdb/weighted-cache"
-documentation = "https://docs.rs/weighted-cache/"
-keywords = ["cache", "weighted", "tinylfu", "lfu", "eviction", "priority"]
-categories = ["cache"]
 license = "Apache-2.0"
 
-[dependencies]
+[workspace.dependencies]
+weighted-cache = { path = "crates/weighted-cache" }
+weighted-cache-derive = { path = "crates/weighted-cache-derive" }
+
 parking_lot = "0.12"
 crossbeam-queue = "0.3"
 indexmap = "2"
 ahash = "0.8"
 deepsize = "0.2"
+proc-macro2 = "1"
+quote = "1"
+syn = "2"
 
-[dev-dependencies]
+# dev dependencies
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 criterion = "0.8"
 proptest = "1"
 trybuild = "1"
 
-[[bench]]
-name = "cache_benchmark"
-harness = false
-
-
-[lints.clippy]
+[workspace.lints.clippy]
 
 # Checks for usage of `#[allow]` attribute and suggests replacing it with `#[expect]`.
 # `#[expect]` attributes suppress the lint emission, but emit a warning if the expectation is unfulfilled.
@@ -60,7 +60,7 @@ cloned_instead_of_copied = "warn"
 debug_assert_with_mut_call = "warn"
 
 # Denies the configured methods and functions in `clippy.toml`.
-# Some methods are undesirable in certain contexts, and it’s beneficial to lint for them as needed.
+# Some methods are undesirable in certain contexts, and it's beneficial to lint for them as needed.
 # https://rust-lang.github.io/rust-clippy/master/#disallowed_methods
 disallowed_methods = "warn"
 
@@ -70,7 +70,7 @@ disallowed_methods = "warn"
 explicit_into_iter_loop = "warn"
 
 # Checks for impls of `From<..>` that contain `panic!()` or `unwrap()`
-# TryFrom should be used if there’s a possibility of failure.
+# TryFrom should be used if there's a possibility of failure.
 # https://rust-lang.github.io/rust-clippy/master/#fallible_impl_from
 fallible_impl_from = "warn"
 
