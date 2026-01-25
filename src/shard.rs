@@ -305,9 +305,9 @@ mod tests {
 	use deepsize::DeepSizeOf;
 
 	use super::*;
-	use crate::traits::{CacheKey, CacheValue};
+	use crate::traits::CacheKey;
 
-	#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+	#[derive(Hash, Eq, PartialEq, Clone, Debug, DeepSizeOf)]
 	struct TestKey(u64, u64); // (id, weight)
 
 	impl CacheKey for TestKey {
@@ -321,12 +321,6 @@ mod tests {
 	#[derive(DeepSizeOf)]
 	struct TestValue {
 		size: usize,
-	}
-
-	impl CacheValue for TestValue {
-		fn deep_size(&self) -> usize {
-			self.size
-		}
 	}
 
 	fn make_key(id: u64, weight: u64) -> ErasedKey {

@@ -24,13 +24,14 @@ weighted-cache = "0.1"
 Basic usage:
 
 ```rust
-use weighted_cache::{Cache, CacheKey, CacheValue};
+use weighted_cache::{Cache, CacheKey, DeepSizeOf};
 
 // Define your key type
 #[derive(Hash, Eq, PartialEq, Clone)]
 struct UserId(u64);
 
 // Define your value type
+#[derive(Clone, Debug, PartialEq, DeepSizeOf)]
 struct UserData {
     name: String,
     score: i32,
@@ -44,12 +45,6 @@ impl CacheKey for UserId {
         // Higher weight = more resistant to eviction
         // Example: VIP users get higher weight based on ID
         if self.0 < 1000 { 200 } else { 50 }
-    }
-}
-
-impl CacheValue for UserData {
-    fn deep_size(&self) -> usize {
-        std::mem::size_of::<Self>() + self.name.capacity()
     }
 }
 

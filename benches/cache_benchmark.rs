@@ -2,7 +2,7 @@ use std::hint::black_box;
 use std::sync::Arc;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use weighted_cache::{Cache, CacheKey, CacheValue};
+use weighted_cache::{Cache, CacheKey, DeepSizeOf};
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
 struct BenchKey(u64);
@@ -15,15 +15,9 @@ impl CacheKey for BenchKey {
 	}
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, DeepSizeOf)]
 struct BenchValue {
 	data: Vec<u8>,
-}
-
-impl CacheValue for BenchValue {
-	fn deep_size(&self) -> usize {
-		std::mem::size_of::<Self>() + self.data.capacity()
-	}
 }
 
 fn bench_insert(c: &mut Criterion) {

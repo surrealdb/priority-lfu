@@ -361,7 +361,6 @@ mod tests {
 	use deepsize::DeepSizeOf;
 
 	use super::*;
-	use crate::traits::CacheValue;
 
 	#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 	struct TestKey(u64);
@@ -377,12 +376,6 @@ mod tests {
 	#[derive(Clone, Debug, PartialEq, DeepSizeOf)]
 	struct TestValue {
 		data: String,
-	}
-
-	impl CacheValue for TestValue {
-		fn deep_size(&self) -> usize {
-			std::mem::size_of::<Self>() + self.data.capacity()
-		}
 	}
 
 	#[test]

@@ -10,7 +10,7 @@
 //! ## Quick Start
 //!
 //! ```rust
-//! use weighted_cache::{DeepSizeOf, Cache, CacheKey, CacheValue};
+//! use weighted_cache::{DeepSizeOf, Cache, CacheKey};
 //! use std::sync::Arc;
 //!
 //! // Define your key type
@@ -30,14 +30,6 @@
 //!
 //!     fn weight(&self) -> u64 {
 //!         100 // Higher weight = more resistant to eviction
-//!     }
-//! }
-//!
-//! impl CacheValue for UserProfile {
-//!     fn deep_size(&self) -> usize {
-//!         std::mem::size_of::<Self>()
-//!             + self.name.capacity()
-//!             + self.email.capacity()
 //!     }
 //! }
 //!
@@ -111,4 +103,4 @@ pub use builder::CacheBuilder;
 pub use cache::Cache;
 pub use deepsize::DeepSizeOf;
 pub use guard::Guard;
-pub use traits::{CacheKey, CacheValue};
+pub use traits::CacheKey;

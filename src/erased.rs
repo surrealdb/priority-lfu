@@ -4,7 +4,9 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 
-use crate::traits::{CacheKey, CacheValue};
+use deepsize::DeepSizeOf;
+
+use crate::traits::CacheKey;
 
 /// Segment location for W-TinyLFU algorithm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,8 +135,8 @@ impl Entry {
 	/// Create a new entry from a concrete value with the given weight.
 	///
 	/// The weight determines eviction priority (higher = more resistant to eviction).
-	pub fn new<V: CacheValue>(value: V, weight: u64) -> Self {
-		let size = value.deep_size();
+	pub fn new<V: DeepSizeOf + Send + Sync + 'static>(value: V, weight: u64) -> Self {
+		let size = value.deep_size_of();
 		Self {
 			size,
 			weight,
@@ -186,8 +188,6 @@ mod tests {
 	struct TestValue {
 		data: Vec<u8>,
 	}
-
-	impl CacheValue for TestValue {}
 
 	#[test]
 	fn test_erased_key_creation() {

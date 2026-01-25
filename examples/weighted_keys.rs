@@ -1,4 +1,4 @@
-use weighted_cache::{Cache, CacheKey, CacheValue, DeepSizeOf};
+use weighted_cache::{Cache, CacheKey, DeepSizeOf};
 
 /// Example demonstrating how different keys can have different weights
 /// for the same value type.
@@ -8,8 +8,6 @@ struct UserProfile {
 	name: String,
 	email: String,
 }
-
-impl CacheValue for UserProfile {}
 
 // Premium users get high cache priority
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]

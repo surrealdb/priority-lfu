@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::thread;
 
-use weighted_cache::{Cache, CacheBuilder, CacheKey, CacheValue, DeepSizeOf};
+use weighted_cache::{Cache, CacheBuilder, CacheKey, DeepSizeOf};
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
 struct StringKey(String);
@@ -19,12 +19,6 @@ struct StringValue {
 	data: String,
 }
 
-impl CacheValue for StringValue {
-	fn deep_size(&self) -> usize {
-		std::mem::size_of::<Self>() + self.data.capacity()
-	}
-}
-
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
 struct IntKey(u64);
 
@@ -38,12 +32,6 @@ impl CacheKey for IntKey {
 
 #[derive(Clone, Debug, PartialEq, DeepSizeOf)]
 struct IntValue(i64);
-
-impl CacheValue for IntValue {
-	fn deep_size(&self) -> usize {
-		std::mem::size_of::<Self>()
-	}
-}
 
 #[test]
 fn test_basic_operations() {
@@ -315,12 +303,6 @@ fn test_weighted_eviction() {
 	#[derive(Clone, Debug, PartialEq, DeepSizeOf)]
 	struct HighWeightValue;
 
-	impl CacheValue for HighWeightValue {
-		fn deep_size(&self) -> usize {
-			100
-		}
-	}
-
 	// Low weight value (easily evicted)
 	#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 	struct LowWeightKey(u64);
@@ -335,12 +317,6 @@ fn test_weighted_eviction() {
 
 	#[derive(Clone, Debug, PartialEq, DeepSizeOf)]
 	struct LowWeightValue;
-
-	impl CacheValue for LowWeightValue {
-		fn deep_size(&self) -> usize {
-			100
-		}
-	}
 
 	cache.insert(HighWeightKey(1), HighWeightValue);
 	cache.insert(LowWeightKey(2), LowWeightValue);

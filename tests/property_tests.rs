@@ -1,5 +1,5 @@
 use proptest::prelude::*;
-use weighted_cache::{Cache, CacheKey, CacheValue, DeepSizeOf};
+use weighted_cache::{Cache, CacheKey, DeepSizeOf};
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
 struct TestKey(u64, u64); // (id, weight)
@@ -15,12 +15,6 @@ impl CacheKey for TestKey {
 #[derive(Clone, Debug, PartialEq, DeepSizeOf)]
 struct TestValue {
 	size: usize,
-}
-
-impl CacheValue for TestValue {
-	fn deep_size(&self) -> usize {
-		self.size
-	}
 }
 
 proptest! {
