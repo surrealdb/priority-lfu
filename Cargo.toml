@@ -2,6 +2,14 @@
 name = "weighted-cache"
 version = "0.1.0"
 edition = "2024"
+authors = ["Stu Schwartz <stu.schwartz@surrealdb.com>"]
+description = "A high-performance, concurrent, in-memory cache with W-TinyLFU eviction policy and weight-based prioritization."
+repository = "https://github.com/surrealdb/weighted-cache"
+homepage = "https://github.com/surrealdb/weighted-cache"
+documentation = "https://docs.rs/weighted-cache/"
+keywords = ["cache", "weighted", "tinylfu", "lfu", "eviction", "priority"]
+categories = ["cache"]
+license = "Apache-2.0"
 
 [dependencies]
 parking_lot = "0.12"

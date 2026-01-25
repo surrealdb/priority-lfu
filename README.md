@@ -135,18 +135,18 @@ Items with **lower scores** are evicted first:
 ### Architecture
 
 ```
-┌─────────────────────────────────────────┐
-│           Cache (Send + Sync)           │
-│  ┌─────────────────────────────────┐   │
-│  │ Global State (atomics)          │   │
-│  │ - current_size: AtomicUsize     │   │
-│  │ - frequency_sketch: FreqSketch  │   │
-│  └─────────────────────────────────┘   │
+┌───────────────────────────────────────┐
+│           Cache (Send + Sync)         │
+│  ┌─────────────────────────────────┐  │
+│  │ Global State (atomics)          │  │
+│  │ - current_size: AtomicUsize     │  │
+│  │ - frequency_sketch: FreqSketch  │  │
+│  └─────────────────────────────────┘  │
 │  ┌──────┐ ┌──────┐      ┌──────┐      │
 │  │Shard0│ │Shard1│ ...  │ShardN│      │
 │  │RwLock│ │RwLock│      │RwLock│      │
 │  └──────┘ └──────┘      └──────┘      │
-└─────────────────────────────────────────┘
+└───────────────────────────────────────┘
 ```
 
 Each shard contains:
