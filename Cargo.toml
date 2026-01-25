@@ -1,0 +1,20 @@
+[package]
+name = "weighted-cache"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+parking_lot = "0.12"
+crossbeam-queue = "0.3"
+indexmap = "2"
+ahash = "0.8"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+criterion = "0.8"
+proptest = "1"
+trybuild = "1"
+
+[[bench]]
+name = "cache_benchmark"
+harness = false
