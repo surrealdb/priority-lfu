@@ -43,10 +43,6 @@ impl Window {
         }
     }
 
-    /// Check if the window contains a key.
-    pub fn contains(&self, key: &ErasedKey) -> bool {
-        self.entries.contains_key(key)
-    }
 
     /// Pop the oldest (front) entry.
     ///
@@ -60,36 +56,25 @@ impl Window {
         self.entries.get_index(0).map(|(key, _)| key)
     }
 
-    /// Move a key to the back (most recently used).
-    pub fn move_to_back(&mut self, key: &ErasedKey) {
-        if let Some((k, v)) = self.entries.shift_remove_entry(key) {
-            self.entries.insert(k, v);
-        }
-    }
-
-    /// Current size in bytes.
-    pub fn size(&self) -> usize {
-        self.size
-    }
-
-    /// Maximum size in bytes.
-    pub fn max_size(&self) -> usize {
-        self.max_size
-    }
-
-    /// Number of entries.
-    pub fn len(&self) -> usize {
-        self.entries.len()
-    }
-
-    /// Check if window is empty.
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
 
     /// Check if window is over capacity.
     pub fn is_full(&self) -> bool {
         self.size > self.max_size
+    }
+
+    #[cfg(test)]
+    pub fn contains(&self, key: &ErasedKey) -> bool {
+        self.entries.contains_key(key)
+    }
+
+    #[cfg(test)]
+    pub fn size(&self) -> usize {
+        self.size
+    }
+
+    #[cfg(test)]
+    pub fn len(&self) -> usize {
+        self.entries.len()
     }
 
     /// Clear all entries.
@@ -108,11 +93,13 @@ pub struct SegmentedLRU {
     /// Probationary segment
     probationary: IndexMap<ErasedKey, ()>,
     probationary_size: usize,
+    #[allow(dead_code)]
     probationary_max: usize,
 
     /// Protected segment
     protected: IndexMap<ErasedKey, ()>,
     protected_size: usize,
+    #[allow(dead_code)]
     protected_max: usize,
 }
 
@@ -140,11 +127,6 @@ impl SegmentedLRU {
         self.probationary.insert(key, ()).is_none()
     }
 
-    /// Insert into protected segment.
-    pub fn insert_protected(&mut self, key: ErasedKey, size: usize) -> bool {
-        self.protected_size += size;
-        self.protected.insert(key, ()).is_none()
-    }
 
     /// Remove from probationary segment.
     pub fn remove_probationary(&mut self, key: &ErasedKey, size: usize) -> bool {
@@ -180,48 +162,15 @@ impl SegmentedLRU {
         }
     }
 
-    /// Demote a key from protected to probationary.
-    ///
-    /// Returns true if the key was found and demoted.
-    pub fn demote(&mut self, key: &ErasedKey, size: usize) -> bool {
-        if self.protected.shift_remove(key).is_some() {
-            self.protected_size = self.protected_size.saturating_sub(size);
-            self.probationary_size += size;
-            self.probationary.insert(key.clone(), ());
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Check if probationary contains a key.
-    pub fn probationary_contains(&self, key: &ErasedKey) -> bool {
-        self.probationary.contains_key(key)
-    }
-
-    /// Check if protected contains a key.
-    pub fn protected_contains(&self, key: &ErasedKey) -> bool {
-        self.protected.contains_key(key)
-    }
 
     /// Pop the oldest entry from probationary.
     pub fn pop_probationary(&mut self) -> Option<ErasedKey> {
         self.probationary.shift_remove_index(0).map(|(key, _)| key)
     }
 
-    /// Pop the oldest entry from protected.
-    pub fn pop_protected(&mut self) -> Option<ErasedKey> {
-        self.protected.shift_remove_index(0).map(|(key, _)| key)
-    }
-
     /// Get the oldest key from probationary without removing it.
     pub fn peek_probationary(&self) -> Option<&ErasedKey> {
         self.probationary.get_index(0).map(|(key, _)| key)
-    }
-
-    /// Get the oldest key from protected without removing it.
-    pub fn peek_protected(&self) -> Option<&ErasedKey> {
-        self.protected.get_index(0).map(|(key, _)| key)
     }
 
     /// Get a random entry from probationary for eviction sampling.
@@ -242,28 +191,10 @@ impl SegmentedLRU {
         self.protected.get_index(idx).map(|(key, _)| key)
     }
 
-    /// Move a key to the back in probationary (refresh LRU).
-    pub fn refresh_probationary(&mut self, key: &ErasedKey) {
-        if let Some((k, v)) = self.probationary.shift_remove_entry(key) {
-            self.probationary.insert(k, v);
-        }
-    }
-
-    /// Move a key to the back in protected (refresh LRU).
-    pub fn refresh_protected(&mut self, key: &ErasedKey) {
-        if let Some((k, v)) = self.protected.shift_remove_entry(key) {
-            self.protected.insert(k, v);
-        }
-    }
-
     /// Total size across both segments.
+    #[cfg(test)]
     pub fn total_size(&self) -> usize {
         self.probationary_size + self.protected_size
-    }
-
-    /// Total number of entries across both segments.
-    pub fn total_len(&self) -> usize {
-        self.probationary.len() + self.protected.len()
     }
 
     /// Probationary segment size.
@@ -271,19 +202,42 @@ impl SegmentedLRU {
         self.probationary_size
     }
 
-    /// Protected segment size.
-    pub fn protected_size(&self) -> usize {
-        self.protected_size
-    }
-
     /// Check if probationary is over capacity.
     pub fn probationary_is_full(&self) -> bool {
         self.probationary_size > self.probationary_max
     }
 
-    /// Check if protected is over capacity.
-    pub fn protected_is_full(&self) -> bool {
-        self.protected_size > self.protected_max
+    #[cfg(test)]
+    pub fn probationary_contains(&self, key: &ErasedKey) -> bool {
+        self.probationary.contains_key(key)
+    }
+
+    #[cfg(test)]
+    pub fn protected_contains(&self, key: &ErasedKey) -> bool {
+        self.protected.contains_key(key)
+    }
+
+    #[cfg(test)]
+    pub fn protected_size(&self) -> usize {
+        self.protected_size
+    }
+
+    #[cfg(test)]
+    pub fn insert_protected(&mut self, key: ErasedKey, size: usize) -> bool {
+        self.protected_size += size;
+        self.protected.insert(key, ()).is_none()
+    }
+
+    #[cfg(test)]
+    pub fn demote(&mut self, key: &ErasedKey, size: usize) -> bool {
+        if self.protected.shift_remove(key).is_some() {
+            self.protected_size = self.protected_size.saturating_sub(size);
+            self.probationary_size += size;
+            self.probationary.insert(key.clone(), ());
+            true
+        } else {
+            false
+        }
     }
 
     /// Clear all segments.

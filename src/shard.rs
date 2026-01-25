@@ -86,19 +86,11 @@ impl Shard {
         self.entries.contains_key(key)
     }
 
+
     /// Number of entries in this shard.
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.entries.len()
-    }
-
-    /// Check if shard is empty.
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
-    /// Total size of all entries in bytes.
-    pub fn size(&self) -> usize {
-        self.window.size() + self.slru.total_size()
     }
 
     /// Clear all entries.
@@ -111,11 +103,11 @@ impl Shard {
     /// Promote an entry from probationary to protected.
     pub fn promote(&mut self, key: &ErasedKey) -> bool {
         if let Some(entry) = self.entries.get(key) {
-            if entry.get_segment() == Segment::Probationary {
-                if self.slru.promote(key, entry.size) {
-                    entry.set_segment(Segment::Protected);
-                    return true;
-                }
+            if entry.get_segment() == Segment::Probationary
+                && self.slru.promote(key, entry.size)
+            {
+                entry.set_segment(Segment::Protected);
+                return true;
             }
         }
         false
@@ -263,7 +255,6 @@ impl Shard {
                 return Some(EvictionCandidate {
                     key: key.clone(),
                     score,
-                    size: entry.size,
                 });
             }
         }
@@ -275,7 +266,6 @@ impl Shard {
                 return Some(EvictionCandidate {
                     key: key.clone(),
                     score,
-                    size: entry.size,
                 });
             }
         }
@@ -287,7 +277,6 @@ impl Shard {
                 return Some(EvictionCandidate {
                     key: key.clone(),
                     score,
-                    size: entry.size,
                 });
             }
         }
@@ -311,7 +300,6 @@ impl Shard {
 pub struct EvictionCandidate {
     pub key: ErasedKey,
     pub score: f64,
-    pub size: usize,
 }
 
 #[cfg(test)]

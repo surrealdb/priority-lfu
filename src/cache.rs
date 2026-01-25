@@ -290,8 +290,12 @@ impl Cache {
         // Find the candidate with the lowest score
         let victim = candidates
             .into_iter()
-            .min_by(|a, b| a.score.partial_cmp(&b.score).unwrap())
-            .unwrap();
+            .min_by(|a, b| {
+                a.score
+                    .partial_cmp(&b.score)
+                    .expect("NaN score in eviction candidate")
+            })
+            .expect("No eviction candidates despite non-empty candidate list");
 
         // Evict the victim
         let shard_lock = self.get_shard(victim.key.hash);

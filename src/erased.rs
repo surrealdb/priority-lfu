@@ -3,6 +3,7 @@ use std::any::{Any, TypeId};
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
+use std::convert::TryFrom;
 
 /// Segment location for W-TinyLFU algorithm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,13 +14,15 @@ pub enum Segment {
     Protected = 2,
 }
 
-impl From<u8> for Segment {
-    fn from(val: u8) -> Self {
+impl TryFrom<u8> for Segment {
+    type Error = u8;
+
+    fn try_from(val: u8) -> Result<Self, Self::Error> {
         match val {
-            0 => Segment::Window,
-            1 => Segment::Probationary,
-            2 => Segment::Protected,
-            _ => panic!("Invalid segment value: {}", val),
+            0 => Ok(Segment::Window),
+            1 => Ok(Segment::Probationary),
+            2 => Ok(Segment::Protected),
+            _ => Err(val),
         }
     }
 }
@@ -29,7 +32,7 @@ impl From<u8> for Segment {
 /// This allows storing keys of different types in the same HashMap
 /// without requiring a unified enum type.
 #[derive(Clone)]
-pub struct ErasedKey {
+pub(crate) struct ErasedKey {
     /// TypeId of the concrete key type K
     pub type_id: TypeId,
     /// Pre-computed hash of (TypeId, K)
@@ -40,7 +43,7 @@ pub struct ErasedKey {
 
 impl ErasedKey {
     /// Create a new erased key from a concrete key type.
-    pub fn new<K: CacheKey>(key: &K) -> Self {
+    pub fn new<K: CacheKey>(key:&K) -> Self {
         let type_id = TypeId::of::<K>();
         let hash = Self::compute_hash(type_id, key);
         Self {
@@ -59,20 +62,17 @@ impl ErasedKey {
     }
 
     /// Attempt to downcast to the concrete key type.
+    #[cfg(test)]
     pub fn downcast_ref<K: 'static>(&self) -> Option<&K> {
         self.data.downcast_ref()
     }
 
     /// Check equality by comparing with another erased key.
-    ///
-    /// This handles hash collisions by downcasting and comparing the actual keys.
+    #[cfg(test)]
     pub fn equals<K: CacheKey>(&self, other: &K) -> bool {
-        // Fast path: check TypeId and hash
         if self.type_id != TypeId::of::<K>() {
             return false;
         }
-
-        // Slow path: downcast and compare (handles hash collisions)
         if let Some(self_key) = self.downcast_ref::<K>() {
             self_key == other
         } else {
@@ -124,8 +124,6 @@ pub struct Entry {
     pub size: usize,
     /// Cached weight() result (immutable after creation)
     pub weight: u64,
-    /// TypeId for safe downcasting
-    pub type_id: TypeId,
     /// W-TinyLFU segment location (can be updated atomically)
     pub segment: AtomicU8,
 }
@@ -138,7 +136,6 @@ impl Entry {
         Self {
             size,
             weight,
-            type_id: TypeId::of::<V>(),
             value: Arc::new(value),
             segment: AtomicU8::new(Segment::Window as u8),
         }
@@ -149,14 +146,15 @@ impl Entry {
     /// Returns None if the type doesn't match.
     pub fn value_arc<V: Send + Sync + 'static>(&self) -> Option<Arc<V>> {
         // Clone the Arc (cheap reference count bump)
-        let arc_any = self.value.clone();
+        let arc_any = Arc::clone(&self.value);
         // Downcast to concrete type
         Arc::downcast::<V>(arc_any).ok()
     }
 
     /// Get the current segment.
     pub fn get_segment(&self) -> Segment {
-        self.segment.load(Ordering::Acquire).into()
+        let val = self.segment.load(Ordering::Acquire);
+        Segment::try_from(val).expect("Invalid segment value stored in atomic")
     }
 
     /// Set the segment atomically.
@@ -164,19 +162,6 @@ impl Entry {
         self.segment.store(segment as u8, Ordering::Release);
     }
 
-    /// Try to compare-and-swap the segment.
-    ///
-    /// Returns true if the swap was successful.
-    pub fn cas_segment(&self, current: Segment, new: Segment) -> bool {
-        self.segment
-            .compare_exchange(
-                current as u8,
-                new as u8,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            )
-            .is_ok()
-    }
 }
 
 #[cfg(test)]
@@ -207,7 +192,7 @@ mod tests {
     #[test]
     fn test_erased_key_creation() {
         let key = TestKey(42);
-        let erased = ErasedKey::new(&key);
+        let erased = ErasedKey::new(key);
 
         assert_eq!(erased.type_id, TypeId::of::<TestKey>());
         assert!(erased.downcast_ref::<TestKey>().is_some());
@@ -235,7 +220,6 @@ mod tests {
 
         assert_eq!(entry.weight, 50);
         assert!(entry.size > 0);
-        assert_eq!(entry.type_id, TypeId::of::<TestValue>());
         assert_eq!(entry.get_segment(), Segment::Window);
     }
 
@@ -265,10 +249,7 @@ mod tests {
         entry.set_segment(Segment::Probationary);
         assert_eq!(entry.get_segment(), Segment::Probationary);
 
-        assert!(entry.cas_segment(Segment::Probationary, Segment::Protected));
-        assert_eq!(entry.get_segment(), Segment::Protected);
-
-        assert!(!entry.cas_segment(Segment::Probationary, Segment::Window));
+        entry.set_segment(Segment::Protected);
         assert_eq!(entry.get_segment(), Segment::Protected);
     }
 }
