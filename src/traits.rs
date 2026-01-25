@@ -17,19 +17,29 @@ use deepsize::DeepSizeOf;
 ///     name: String,
 /// }
 ///
-/// impl CacheValue for UserData {
-///     fn weight(&self) -> u64 {
-///         100
-///     }
-/// }
+/// impl CacheValue for UserData {}
 ///
 /// impl CacheKey for UserId {
 ///     type Value = UserData;
+///
+///     fn weight(&self) -> u64 {
+///         100
+///     }
 /// }
 /// ```
 pub trait CacheKey: Hash + Eq + Clone + Send + Sync + 'static {
 	/// The value type associated with this key.
 	type Value: CacheValue;
+
+	/// Eviction priority. Higher weight = more resistant to eviction.
+	///
+	/// This is *not* the memory size—it's a logical priority.
+	/// When the cache is full, items with lower `weight() / frequency` ratios
+	/// are evicted first.
+	///
+	/// This method is called on the key, allowing different keys to have
+	/// different weights for the same value type.
+	fn weight(&self) -> u64;
 }
 
 /// Trait for cacheable values.
@@ -54,11 +64,6 @@ pub trait CacheKey: Hash + Eq + Clone + Send + Sync + 'static {
 ///             + self.name.capacity()
 ///             + self.email.capacity()
 ///     }
-///
-///     fn weight(&self) -> u64 {
-///         // Higher weight = more resistant to eviction
-///         100
-///     }
 /// }
 /// ```
 pub trait CacheValue: DeepSizeOf + Send + Sync + 'static {
@@ -71,11 +76,4 @@ pub trait CacheValue: DeepSizeOf + Send + Sync + 'static {
 	fn deep_size(&self) -> usize {
 		DeepSizeOf::deep_size_of(self)
 	}
-
-	/// Eviction priority. Higher weight = more resistant to eviction.
-	///
-	/// This is *not* the memory size—it's a logical priority.
-	/// When the cache is full, items with lower `weight() / frequency` ratios
-	/// are evicted first.
-	fn weight(&self) -> u64;
 }

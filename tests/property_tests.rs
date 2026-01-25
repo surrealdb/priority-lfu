@@ -2,25 +2,24 @@ use proptest::prelude::*;
 use weighted_cache::{Cache, CacheKey, CacheValue, DeepSizeOf};
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
-struct TestKey(u64);
+struct TestKey(u64, u64); // (id, weight)
 
 impl CacheKey for TestKey {
 	type Value = TestValue;
+
+	fn weight(&self) -> u64 {
+		self.1
+	}
 }
 
 #[derive(Clone, Debug, PartialEq, DeepSizeOf)]
 struct TestValue {
 	size: usize,
-	weight: u64,
 }
 
 impl CacheValue for TestValue {
 	fn deep_size(&self) -> usize {
 		self.size
-	}
-
-	fn weight(&self) -> u64 {
-		self.weight
 	}
 }
 
@@ -30,12 +29,12 @@ proptest! {
 		let cache = Cache::new(1024 * 1024); // 1MB to avoid eviction during test
 
 		for key in &keys {
-			let value = TestValue { size: 100, weight: 50 };
-			cache.insert(TestKey(*key), value.clone());
+			let value = TestValue { size: 100 };
+			cache.insert(TestKey(*key, 50), value.clone());
 		}
 
 		for key in &keys {
-			let result = cache.get_arc(&TestKey(*key));
+			let result = cache.get_arc(&TestKey(*key, 50));
 			prop_assert!(result.is_some());
 		}
 	}
@@ -46,7 +45,7 @@ proptest! {
 		let cache = Cache::new(max_size);
 
 		for (key, size, weight) in operations {
-			cache.insert(TestKey(key), TestValue { size, weight });
+			cache.insert(TestKey(key, weight), TestValue { size });
 		}
 
 		// Size should never exceed max_size (with some tolerance for overhead)
@@ -62,8 +61,8 @@ proptest! {
 		let mut inserted_keys = Vec::new();
 
 		for (key, size, weight) in inserts {
-			cache.insert(TestKey(key), TestValue { size, weight });
-			inserted_keys.push(TestKey(key));
+			cache.insert(TestKey(key, weight), TestValue { size });
+			inserted_keys.push(TestKey(key, weight));
 		}
 
 		let size_before = cache.size();
@@ -85,7 +84,7 @@ proptest! {
 		let cache = Cache::new(1024 * 1024); // 1MB to avoid eviction during test
 
 		for (key, size, weight) in operations {
-			cache.insert(TestKey(key), TestValue { size, weight });
+			cache.insert(TestKey(key, weight), TestValue { size });
 		}
 
 		cache.clear();
@@ -99,15 +98,17 @@ proptest! {
 	fn test_update_existing_key(key in 0u64..100, values in prop::collection::vec((10usize..200, 10u64..100), 2..10)) {
 		let cache = Cache::new(1024 * 1024); // 1MB to avoid eviction during test
 
-		for (size, weight) in values {
-			cache.insert(TestKey(key), TestValue { size, weight });
+		// Use a fixed weight for the key
+		let weight = 50u64;
+		for (size, _) in values {
+			cache.insert(TestKey(key, weight), TestValue { size });
 		}
 
 		// Key should exist
-		prop_assert!(cache.contains(&TestKey(key)));
+		prop_assert!(cache.contains(&TestKey(key, weight)));
 
 		// Cache should have exactly 1 entry for this key
-		let result = cache.get_arc(&TestKey(key));
+		let result = cache.get_arc(&TestKey(key, weight));
 		prop_assert!(result.is_some());
 	}
 
@@ -116,11 +117,11 @@ proptest! {
 		let cache = Cache::new(1024 * 1024); // 1MB to avoid eviction during test
 
 		for key in &keys {
-			cache.insert(TestKey(*key), TestValue { size: 100, weight: 50 });
+			cache.insert(TestKey(*key, 50), TestValue { size: 100 });
 		}
 
 		for key in &keys {
-			prop_assert!(cache.contains(&TestKey(*key)));
+			prop_assert!(cache.contains(&TestKey(*key, 50)));
 		}
 	}
 
@@ -129,12 +130,12 @@ proptest! {
 		let cache = Cache::new(1024 * 1024); // 1MB to avoid eviction during test
 
 		for key in &keys {
-			cache.insert(TestKey(*key), TestValue { size: 100, weight: 50 });
+			cache.insert(TestKey(*key, 50), TestValue { size: 100 });
 		}
 
 		for key in &keys {
-			cache.remove(&TestKey(*key));
-			prop_assert!(!cache.contains(&TestKey(*key)));
+			cache.remove(&TestKey(*key, 50));
+			prop_assert!(!cache.contains(&TestKey(*key, 50)));
 		}
 	}
 }
@@ -144,9 +145,9 @@ fn test_no_panics_on_empty_operations() {
 	let cache = Cache::new(1024);
 
 	// Operations on empty cache should not panic
-	assert!(cache.get_arc(&TestKey(1)).is_none());
-	assert!(cache.remove(&TestKey(1)).is_none());
-	assert!(!cache.contains(&TestKey(1)));
+	assert!(cache.get_arc(&TestKey(1, 50)).is_none());
+	assert!(cache.remove(&TestKey(1, 50)).is_none());
+	assert!(!cache.contains(&TestKey(1, 50)));
 	assert_eq!(cache.len(), 0);
 	assert_eq!(cache.size(), 0);
 
@@ -156,14 +157,13 @@ fn test_no_panics_on_empty_operations() {
 #[test]
 fn test_duplicate_insertions() {
 	let cache = Cache::new(10240);
-	let key = TestKey(1);
+	let key = TestKey(1, 50);
 
-	for i in 0..100 {
+	for _ in 0..100 {
 		cache.insert(
 			key.clone(),
 			TestValue {
 				size: 50,
-				weight: i,
 			},
 		);
 	}

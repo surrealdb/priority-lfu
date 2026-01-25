@@ -258,6 +258,10 @@ mod tests {
 
 	impl CacheKey for TestKey {
 		type Value = TestValue;
+
+		fn weight(&self) -> u64 {
+			50
+		}
 	}
 
 	#[derive(DeepSizeOf)]
@@ -266,9 +270,6 @@ mod tests {
 	impl CacheValue for TestValue {
 		fn deep_size(&self) -> usize {
 			100
-		}
-		fn weight(&self) -> u64 {
-			50
 		}
 	}
 

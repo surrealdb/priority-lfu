@@ -39,17 +39,17 @@ struct UserData {
 // Implement required traits
 impl CacheKey for UserId {
     type Value = UserData;
+
+    fn weight(&self) -> u64 {
+        // Higher weight = more resistant to eviction
+        // Example: VIP users get higher weight based on ID
+        if self.0 < 1000 { 200 } else { 50 }
+    }
 }
 
 impl CacheValue for UserData {
     fn deep_size(&self) -> usize {
         std::mem::size_of::<Self>() + self.name.capacity()
-    }
-
-    fn weight(&self) -> u64 {
-        // Higher weight = more resistant to eviction
-        // Example: VIP users get higher weight
-        if self.score > 1000 { 200 } else { 50 }
     }
 }
 

@@ -9,6 +9,10 @@ struct AsyncKey(u64);
 
 impl CacheKey for AsyncKey {
 	type Value = AsyncValue;
+
+	fn weight(&self) -> u64 {
+		100
+	}
 }
 
 #[derive(Clone, Debug, PartialEq, DeepSizeOf)]
@@ -19,10 +23,6 @@ struct AsyncValue {
 impl CacheValue for AsyncValue {
 	fn deep_size(&self) -> usize {
 		std::mem::size_of::<Self>() + self.data.capacity()
-	}
-
-	fn weight(&self) -> u64 {
-		100
 	}
 }
 

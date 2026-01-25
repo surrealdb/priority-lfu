@@ -9,6 +9,10 @@ struct BenchKey(u64);
 
 impl CacheKey for BenchKey {
 	type Value = BenchValue;
+
+	fn weight(&self) -> u64 {
+		50
+	}
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -19,10 +23,6 @@ struct BenchValue {
 impl CacheValue for BenchValue {
 	fn deep_size(&self) -> usize {
 		std::mem::size_of::<Self>() + self.data.capacity()
-	}
-
-	fn weight(&self) -> u64 {
-		50
 	}
 }
 

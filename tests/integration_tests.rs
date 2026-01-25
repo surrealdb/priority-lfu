@@ -8,6 +8,10 @@ struct StringKey(String);
 
 impl CacheKey for StringKey {
 	type Value = StringValue;
+
+	fn weight(&self) -> u64 {
+		100
+	}
 }
 
 #[derive(Clone, Debug, PartialEq, DeepSizeOf)]
@@ -19,10 +23,6 @@ impl CacheValue for StringValue {
 	fn deep_size(&self) -> usize {
 		std::mem::size_of::<Self>() + self.data.capacity()
 	}
-
-	fn weight(&self) -> u64 {
-		100
-	}
 }
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
@@ -30,6 +30,10 @@ struct IntKey(u64);
 
 impl CacheKey for IntKey {
 	type Value = IntValue;
+
+	fn weight(&self) -> u64 {
+		50
+	}
 }
 
 #[derive(Clone, Debug, PartialEq, DeepSizeOf)]
@@ -38,10 +42,6 @@ struct IntValue(i64);
 impl CacheValue for IntValue {
 	fn deep_size(&self) -> usize {
 		std::mem::size_of::<Self>()
-	}
-
-	fn weight(&self) -> u64 {
-		50
 	}
 }
 
@@ -306,6 +306,10 @@ fn test_weighted_eviction() {
 
 	impl CacheKey for HighWeightKey {
 		type Value = HighWeightValue;
+
+		fn weight(&self) -> u64 {
+			1000 // Very high weight
+		}
 	}
 
 	#[derive(Clone, Debug, PartialEq, DeepSizeOf)]
@@ -315,10 +319,6 @@ fn test_weighted_eviction() {
 		fn deep_size(&self) -> usize {
 			100
 		}
-
-		fn weight(&self) -> u64 {
-			1000 // Very high weight
-		}
 	}
 
 	// Low weight value (easily evicted)
@@ -327,6 +327,10 @@ fn test_weighted_eviction() {
 
 	impl CacheKey for LowWeightKey {
 		type Value = LowWeightValue;
+
+		fn weight(&self) -> u64 {
+			1 // Very low weight
+		}
 	}
 
 	#[derive(Clone, Debug, PartialEq, DeepSizeOf)]
@@ -335,9 +339,6 @@ fn test_weighted_eviction() {
 	impl CacheValue for LowWeightValue {
 		fn deep_size(&self) -> usize {
 			100
-		}
-		fn weight(&self) -> u64 {
-			1 // Very low weight
 		}
 	}
 

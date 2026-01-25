@@ -308,43 +308,45 @@ mod tests {
 	use crate::traits::{CacheKey, CacheValue};
 
 	#[derive(Hash, Eq, PartialEq, Clone, Debug)]
-	struct TestKey(u64);
+	struct TestKey(u64, u64); // (id, weight)
 
 	impl CacheKey for TestKey {
 		type Value = TestValue;
+
+		fn weight(&self) -> u64 {
+			self.1
+		}
 	}
 
 	#[derive(DeepSizeOf)]
 	struct TestValue {
 		size: usize,
-		weight: u64,
 	}
 
 	impl CacheValue for TestValue {
 		fn deep_size(&self) -> usize {
 			self.size
 		}
-		fn weight(&self) -> u64 {
-			self.weight
-		}
 	}
 
-	fn make_key(id: u64) -> ErasedKey {
-		ErasedKey::new(&TestKey(id))
+	fn make_key(id: u64, weight: u64) -> ErasedKey {
+		ErasedKey::new(&TestKey(id, weight))
 	}
 
 	fn make_entry(size: usize, weight: u64) -> Entry {
-		Entry::new(TestValue {
-			size,
+		Entry::new(
+			TestValue {
+				size,
+			},
 			weight,
-		})
+		)
 	}
 
 	#[test]
 	fn test_shard_insert() {
 		let mut shard = Shard::new(100, 200, 800);
 
-		let key = make_key(1);
+		let key = make_key(1, 10);
 		let entry = make_entry(50, 10);
 
 		assert!(shard.insert(key.clone(), entry).is_none());
@@ -356,7 +358,7 @@ mod tests {
 	fn test_shard_remove() {
 		let mut shard = Shard::new(100, 200, 800);
 
-		let key = make_key(1);
+		let key = make_key(1, 10);
 		let entry = make_entry(50, 10);
 
 		shard.insert(key.clone(), entry);
@@ -385,7 +387,7 @@ mod tests {
 
 		// Insert entries into window (exceeding capacity)
 		for i in 0..5 {
-			let key = make_key(i);
+			let key = make_key(i, 10);
 			let entry = make_entry(50, 10);
 			shard.insert(key, entry);
 		}
@@ -401,7 +403,7 @@ mod tests {
 	fn test_promotion() {
 		let mut shard = Shard::new(100, 500, 1000);
 
-		let key = make_key(1);
+		let key = make_key(1, 10);
 		let entry = make_entry(50, 10);
 
 		shard.insert(key.clone(), entry);

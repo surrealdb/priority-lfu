@@ -130,10 +130,11 @@ pub struct Entry {
 }
 
 impl Entry {
-	/// Create a new entry from a concrete value.
-	pub fn new<V: CacheValue>(value: V) -> Self {
+	/// Create a new entry from a concrete value with the given weight.
+	///
+	/// The weight determines eviction priority (higher = more resistant to eviction).
+	pub fn new<V: CacheValue>(value: V, weight: u64) -> Self {
 		let size = value.deep_size();
-		let weight = value.weight();
 		Self {
 			size,
 			weight,
@@ -175,6 +176,10 @@ mod tests {
 
 	impl CacheKey for TestKey {
 		type Value = TestValue;
+
+		fn weight(&self) -> u64 {
+			50
+		}
 	}
 
 	#[derive(DeepSizeOf)]
@@ -182,11 +187,7 @@ mod tests {
 		data: Vec<u8>,
 	}
 
-	impl CacheValue for TestValue {
-		fn weight(&self) -> u64 {
-			50
-		}
-	}
+	impl CacheValue for TestValue {}
 
 	#[test]
 	fn test_erased_key_creation() {
@@ -215,7 +216,7 @@ mod tests {
 		let value = TestValue {
 			data: vec![1, 2, 3, 4],
 		};
-		let entry = Entry::new(value);
+		let entry = Entry::new(value, 50);
 
 		assert_eq!(entry.weight, 50);
 		assert!(entry.size > 0);
@@ -227,7 +228,7 @@ mod tests {
 		let value = TestValue {
 			data: vec![1, 2, 3, 4],
 		};
-		let entry = Entry::new(value);
+		let entry = Entry::new(value, 50);
 
 		let arc = entry.value_arc::<TestValue>();
 		assert!(arc.is_some());
@@ -241,7 +242,7 @@ mod tests {
 		let value = TestValue {
 			data: vec![1, 2, 3],
 		};
-		let entry = Entry::new(value);
+		let entry = Entry::new(value, 50);
 
 		assert_eq!(entry.get_segment(), Segment::Window);
 

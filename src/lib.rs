@@ -27,6 +27,10 @@
 //! // Implement the required traits
 //! impl CacheKey for UserId {
 //!     type Value = UserProfile;
+//!
+//!     fn weight(&self) -> u64 {
+//!         100 // Higher weight = more resistant to eviction
+//!     }
 //! }
 //!
 //! impl CacheValue for UserProfile {
@@ -34,10 +38,6 @@
 //!         std::mem::size_of::<Self>()
 //!             + self.name.capacity()
 //!             + self.email.capacity()
-//!     }
-//!
-//!     fn weight(&self) -> u64 {
-//!         100 // Higher weight = more resistant to eviction
 //!     }
 //! }
 //!

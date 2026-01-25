@@ -117,7 +117,8 @@ impl Cache {
 	/// Returns the previous value if the key existed.
 	pub fn insert<K: CacheKey>(&self, key: K, value: K::Value) -> Option<Arc<K::Value>> {
 		let erased_key = ErasedKey::new(&key);
-		let entry = Entry::new(value);
+		let weight = key.weight();
+		let entry = Entry::new(value, weight);
 		let entry_size = entry.size;
 
 		// Get the shard
@@ -367,6 +368,10 @@ mod tests {
 
 	impl CacheKey for TestKey {
 		type Value = TestValue;
+
+		fn weight(&self) -> u64 {
+			50
+		}
 	}
 
 	#[derive(Clone, Debug, PartialEq, DeepSizeOf)]
@@ -377,10 +382,6 @@ mod tests {
 	impl CacheValue for TestValue {
 		fn deep_size(&self) -> usize {
 			std::mem::size_of::<Self>() + self.data.capacity()
-		}
-
-		fn weight(&self) -> u64 {
-			50
 		}
 	}
 
