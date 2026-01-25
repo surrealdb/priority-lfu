@@ -358,9 +358,8 @@ unsafe impl Sync for Cache {}
 
 #[cfg(test)]
 mod tests {
-	use deepsize::DeepSizeOf;
-
 	use super::*;
+	use crate::DeepSizeOf;
 
 	#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 	struct TestKey(u64);

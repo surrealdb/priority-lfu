@@ -92,6 +92,7 @@
 
 mod builder;
 mod cache;
+mod deepsize;
 mod erased;
 mod guard;
 mod segments;
@@ -101,8 +102,7 @@ mod traits;
 
 pub use builder::CacheBuilder;
 pub use cache::Cache;
-pub use deepsize::DeepSizeOf;
+pub use deepsize::{Context, DeepSizeOf};
 pub use guard::Guard;
 pub use traits::CacheKey;
-
-pub use deepsize;
+pub use weighted_cache_derive::*;

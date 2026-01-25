@@ -1,6 +1,6 @@
 use std::hash::Hash;
 
-use deepsize::DeepSizeOf;
+use crate::deepsize::DeepSizeOf;
 
 /// Marker trait for cache keys. Associates a key type with its value type.
 ///

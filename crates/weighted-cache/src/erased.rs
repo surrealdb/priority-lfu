@@ -4,8 +4,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 
-use deepsize::DeepSizeOf;
-
+use crate::deepsize::DeepSizeOf;
 use crate::traits::CacheKey;
 
 /// Segment location for W-TinyLFU algorithm.
@@ -169,9 +168,8 @@ impl Entry {
 
 #[cfg(test)]
 mod tests {
-	use deepsize::DeepSizeOf;
-
 	use super::*;
+	use crate::DeepSizeOf;
 
 	#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 	struct TestKey(u64);

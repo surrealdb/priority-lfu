@@ -248,9 +248,8 @@ impl SegmentedLRU {
 
 #[cfg(test)]
 mod tests {
-	use deepsize::DeepSizeOf;
-
 	use super::*;
+	use crate::DeepSizeOf;
 	use crate::traits::CacheKey;
 
 	#[derive(Hash, Eq, PartialEq, Clone, Debug)]
