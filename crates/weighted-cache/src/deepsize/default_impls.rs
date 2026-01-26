@@ -69,6 +69,10 @@ known_deep_size!(0;
 );
 
 known_deep_size!(0;
+	{T} core::ops::Bound<T>
+);
+
+known_deep_size!(0;
 	{T: ?Sized} core::marker::PhantomData<T>,
 	{T} core::mem::MaybeUninit<T>,
 	// In theory this could be incorrect, but it's unlikely

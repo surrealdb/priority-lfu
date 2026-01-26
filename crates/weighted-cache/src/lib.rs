@@ -4,7 +4,7 @@
 //! - **Size-bounded capacity** (bytes, not item count)
 //! - **Weight-based eviction** (separate from size)
 //! - **Heterogeneous storage** (multiple key/value types without a unified enum)
-//! - **W-TinyLFU eviction policy** for near-optimal hit rates
+//! - **Clock-PRO eviction policy** for scan resistance and high hit rates
 //! - **Read-optimized concurrency** via fine-grained sharding
 //!
 //! ## Quick Start
@@ -95,9 +95,7 @@ mod cache;
 mod deepsize;
 mod erased;
 mod guard;
-mod segments;
 mod shard;
-mod sketch;
 mod traits;
 
 pub use builder::CacheBuilder;

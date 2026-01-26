@@ -1,13 +1,11 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crossbeam_queue::SegQueue;
 use parking_lot::RwLock;
 
-use crate::erased::{Entry, ErasedKey, Segment};
+use crate::erased::{Entry, ErasedKey, ErasedKeyRef};
 use crate::guard::Guard;
 use crate::shard::Shard;
-use crate::sketch::FrequencySketch;
 use crate::traits::CacheKey;
 
 /// Thread-safe cache. Can be shared across threads via `Arc<Cache>`.
@@ -31,10 +29,6 @@ use crate::traits::CacheKey;
 pub struct Cache {
 	/// Sharded storage
 	shards: Vec<RwLock<Shard>>,
-	/// Global frequency sketch (shared across all shards)
-	sketch: FrequencySketch,
-	/// Promotion buffer for deferred promotions (lock-free MPMC queue)
-	promotion_buffer: SegQueue<ErasedKey>,
 	/// Current total size in bytes
 	current_size: AtomicUsize,
 	/// Total entry count
@@ -48,7 +42,7 @@ pub struct Cache {
 impl Cache {
 	/// Create a new cache with the given maximum size in bytes.
 	///
-	/// Uses default configuration: 64 shards, 1% window, 20% probationary, 80% protected.
+	/// Uses default configuration: 64 shards, 90% hot target.
 	pub fn new(max_size_bytes: usize) -> Self {
 		Self::with_shards(max_size_bytes, 64)
 	}
@@ -58,7 +52,7 @@ impl Cache {
 	/// More shards reduce contention but increase memory overhead.
 	/// Recommended: `num_cpus * 8` to `num_cpus * 16`.
 	pub fn with_shards(max_size_bytes: usize, shard_count: usize) -> Self {
-		Self::with_config(max_size_bytes, shard_count, 0.01, 0.80)
+		Self::with_config(max_size_bytes, shard_count, 0.9)
 	}
 
 	/// Create with full custom configuration.
@@ -67,44 +61,31 @@ impl Cache {
 	///
 	/// * `max_size_bytes` - Maximum cache size in bytes
 	/// * `shard_count` - Number of shards (will be rounded to next power of 2)
-	/// * `window_percent` - Window size as percentage of total capacity (e.g., 0.01 = 1%)
-	/// * `protected_percent` - Protected segment as percentage of main cache (e.g., 0.80 = 80%)
+	/// * `hot_percent` - Target percentage of capacity for hot entries (e.g., 0.9 = 90%)
 	///
 	/// This is primarily used by `CacheBuilder`. Most users should use `new()` or `with_shards()`.
 	pub fn with_config(
 		max_size_bytes: usize,
 		shard_count: usize,
-		window_percent: f32,
-		protected_percent: f32,
+		hot_percent: f32,
 	) -> Self {
 		// Ensure shard_count is a power of 2 for efficient masking
 		let shard_count = shard_count.next_power_of_two().max(4);
 
-		// Distribute capacity across segments
-		let probationary_percent = 1.0 - protected_percent; // Remaining portion of main cache
-
-		let window_size = (max_size_bytes as f64 * window_percent as f64) as usize;
-		let main_size = max_size_bytes - window_size;
-		let probationary_size = (main_size as f64 * probationary_percent as f64) as usize;
-		let protected_size = (main_size as f64 * protected_percent as f64) as usize;
-
-		// Divide per shard
-		let window_per_shard = window_size / shard_count;
-		let prob_per_shard = probationary_size / shard_count;
-		let prot_per_shard = protected_size / shard_count;
+		// Divide capacity per shard
+		let size_per_shard = max_size_bytes / shard_count;
+		
+		// Estimate ghost capacity (roughly half of estimated items)
+		let estimated_items = max_size_bytes / 100; // Rough estimate
+		let ghost_per_shard = estimated_items / (shard_count * 2);
 
 		// Create shards
 		let shards = (0..shard_count)
-			.map(|_| RwLock::new(Shard::new(window_per_shard, prob_per_shard, prot_per_shard)))
+			.map(|_| RwLock::new(Shard::new(size_per_shard, hot_percent, ghost_per_shard)))
 			.collect();
-
-		// Create frequency sketch sized for expected capacity
-		let sketch = FrequencySketch::new(max_size_bytes / 100); // Rough estimate
 
 		Self {
 			shards,
-			sketch,
-			promotion_buffer: SegQueue::new(),
 			current_size: AtomicUsize::new(0),
 			entry_count: AtomicUsize::new(0),
 			max_size: max_size_bytes,
@@ -115,6 +96,13 @@ impl Cache {
 	/// Insert a key-value pair. Evicts items if necessary.
 	///
 	/// Returns the previous value if the key existed.
+	///
+	/// # Runtime Complexity
+	///
+	/// Expected case: O(1) for successful insertion without eviction.
+	///
+	/// Worst case: O(n) where n is the number of entries per shard.
+	/// Eviction happens via clock hand advancement within the shard.
 	pub fn insert<K: CacheKey>(&self, key: K, value: K::Value) -> Option<Arc<K::Value>> {
 		let erased_key = ErasedKey::new(&key);
 		let weight = key.weight();
@@ -124,14 +112,11 @@ impl Cache {
 		// Get the shard
 		let shard_lock = self.get_shard(erased_key.hash);
 
-		// Process pending promotions before acquiring write lock
-		self.drain_promotions();
-
 		// Acquire write lock
 		let mut shard = shard_lock.write();
 
-		// Check if key already exists
-		let old_entry = shard.insert(erased_key.clone(), entry);
+		// Insert (handles eviction internally via Clock-PRO)
+		let (old_entry, (num_evictions, evicted_size)) = shard.insert(erased_key, entry);
 
 		if let Some(ref old) = old_entry {
 			// Update size (might be different)
@@ -147,18 +132,10 @@ impl Cache {
 			self.entry_count.fetch_add(1, Ordering::Relaxed);
 		}
 
-		// Increment frequency
-		self.sketch.increment(erased_key.hash);
-
-		// Admit from window if needed
-		shard.admit_from_window(&self.sketch);
-
-		// Check if we need to evict
-		drop(shard); // Release lock before eviction
-		while self.current_size.load(Ordering::Relaxed) > self.max_size {
-			if !self.evict_one() {
-				break; // No more entries to evict
-			}
+		// Account for evictions
+		if num_evictions > 0 {
+			self.entry_count.fetch_sub(num_evictions, Ordering::Relaxed);
+			self.current_size.fetch_sub(evicted_size, Ordering::Relaxed);
 		}
 
 		old_entry.and_then(|e| e.value_arc::<K::Value>())
@@ -170,23 +147,22 @@ impl Cache {
 	///
 	/// Do NOT hold this guard across `.await` points. Use `get_arc()` instead
 	/// for async contexts.
+	///
+	/// # Runtime Complexity
+	///
+	/// Expected case: O(1)
+	///
+	/// This method performs a zero-allocation hash table lookup and atomically
+	/// increments the reference counter for Clock-PRO.
 	pub fn get<K: CacheKey>(&self, key: &K) -> Option<Guard<'_, K::Value>> {
-		let erased_key = ErasedKey::new(key);
-		let shard_lock = self.get_shard(erased_key.hash);
+		let key_ref = ErasedKeyRef::new(key);  // Zero allocation
+		let shard_lock = self.get_shard(key_ref.hash);
 
 		// Acquire read lock
 		let shard = shard_lock.read();
 
-		// Look up entry
-		let entry = shard.get(&erased_key)?;
-
-		// Increment frequency (lock-free)
-		self.sketch.increment(erased_key.hash);
-
-		// Mark for promotion if in probationary
-		if entry.get_segment() == Segment::Probationary {
-			self.promotion_buffer.push(erased_key);
-		}
+		// Look up entry (bumps reference counter internally, zero allocation)
+		let entry = shard.get_ref(&key_ref)?;
 
 		// Get pointer to value
 		let value_ptr = entry.value.as_ref() as *const _ as *const K::Value;
@@ -199,27 +175,21 @@ impl Cache {
 	/// Retrieve a value as `Arc<V>`. Safe to hold across `.await` points.
 	///
 	/// This is the preferred method for async code.
+	///
+	/// # Runtime Complexity
+	///
+	/// Expected case: O(1)
+	///
+	/// This method performs a zero-allocation hash table lookup, clones an `Arc`
+	/// pointer (not the underlying value), and atomically increments the reference counter.
 	pub fn get_arc<K: CacheKey>(&self, key: &K) -> Option<Arc<K::Value>> {
-		let erased_key = ErasedKey::new(key);
-		let shard_lock = self.get_shard(erased_key.hash);
+		let key_ref = ErasedKeyRef::new(key);  // Zero allocation
+		let shard_lock = self.get_shard(key_ref.hash);
 
 		// Short-lived read lock
-		let arc = {
-			let shard = shard_lock.read();
-			let entry = shard.get(&erased_key)?;
-			entry.value_arc::<K::Value>()?
-		}; // Lock released here
-
-		// Increment frequency (lock-free, outside lock)
-		self.sketch.increment(erased_key.hash);
-
-		// Mark for promotion if in probationary
-		if let Some(shard) = shard_lock.try_read()
-			&& let Some(entry) = shard.get(&erased_key)
-			&& entry.get_segment() == Segment::Probationary
-		{
-			self.promotion_buffer.push(erased_key);
-		}
+		let shard = shard_lock.read();
+		let entry = shard.get_ref(&key_ref)?;  // Zero-allocation lookup
+		let arc = entry.value_arc::<K::Value>()?;
 
 		Some(arc)
 	}
@@ -227,6 +197,14 @@ impl Cache {
 	/// Retrieve a cloned value. Safe to hold across `.await` points.
 	///
 	/// Requires `V: Clone`. Use `get_arc()` if clone is expensive.
+	///
+	/// # Runtime Complexity
+	///
+	/// Expected case: O(1) + O(m) where m is the cost of cloning the value.
+	///
+	/// This method performs a hash table lookup in O(1) expected time, then clones
+	/// the underlying value. If cloning is expensive, prefer `get_arc()` which only
+	/// clones the `Arc` pointer in O(1) time.
 	pub fn get_clone<K: CacheKey>(&self, key: &K) -> Option<K::Value>
 	where
 		K::Value: Clone,
@@ -235,6 +213,16 @@ impl Cache {
 	}
 
 	/// Remove a key from the cache.
+	///
+	/// # Runtime Complexity
+	///
+	/// Expected case: O(1)
+	///
+	/// Worst case: O(n) where n is the number of entries per shard.
+	///
+	/// The worst case occurs when the entry is removed from an IndexMap segment,
+	/// which preserves insertion order and may require shifting elements. In practice,
+	/// most removals are O(1) amortized.
 	pub fn remove<K: CacheKey>(&self, key: &K) -> Option<Arc<K::Value>> {
 		let erased_key = ErasedKey::new(key);
 		let shard_lock = self.get_shard(erased_key.hash);
@@ -248,12 +236,14 @@ impl Cache {
 		entry.value_arc::<K::Value>()
 	}
 
-	/// Check if a key exists without affecting frequency counters.
+	/// Check if a key exists (zero allocation).
 	pub fn contains<K: CacheKey>(&self, key: &K) -> bool {
-		let erased_key = ErasedKey::new(key);
-		let shard_lock = self.get_shard(erased_key.hash);
+		let key_ref = ErasedKeyRef::new(key);  // Zero allocation
+		let shard_lock = self.get_shard(key_ref.hash);
 		let shard = shard_lock.read();
-		shard.contains(&erased_key)
+		
+		// Use get_ref for zero-allocation lookup
+		shard.get_ref(&key_ref).is_some()
 	}
 
 	/// Current total size in bytes.
@@ -272,6 +262,13 @@ impl Cache {
 	}
 
 	/// Clear all entries.
+	///
+	/// # Runtime Complexity
+	///
+	/// O(n) where n is the total number of entries in the cache.
+	///
+	/// This method acquires a write lock on each shard sequentially and clears
+	/// all data structures (HashMap and IndexMaps).
 	pub fn clear(&self) {
 		for shard_lock in &self.shards {
 			let mut shard = shard_lock.write();
@@ -287,69 +284,6 @@ impl Cache {
 		&self.shards[index]
 	}
 
-	/// Evict one entry using probabilistic sampling across shards.
-	///
-	/// Returns true if an entry was evicted.
-	fn evict_one(&self) -> bool {
-		// Sample one candidate from each shard
-		let mut candidates = Vec::with_capacity(self.shard_count);
-
-		for shard_lock in &self.shards {
-			if let Some(shard) = shard_lock.try_read()
-				&& let Some(candidate) = shard.sample_eviction_candidate(&self.sketch)
-			{
-				candidates.push(candidate);
-			}
-		}
-
-		if candidates.is_empty() {
-			return false;
-		}
-
-		// Find the candidate with the lowest score
-		let victim = candidates
-			.into_iter()
-			.min_by(|a, b| a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal))
-			.expect("No eviction candidates despite non-empty candidate list");
-
-		// Evict the victim
-		let shard_lock = self.get_shard(victim.key.hash);
-		let mut shard = shard_lock.write();
-
-		if let Some((_, size)) = shard.evict_one(&self.sketch) {
-			self.current_size.fetch_sub(size, Ordering::Relaxed);
-			self.entry_count.fetch_sub(1, Ordering::Relaxed);
-			true
-		} else {
-			false
-		}
-	}
-
-	/// Process pending promotions from the promotion buffer.
-	///
-	/// This is called periodically during write operations to avoid
-	/// acquiring write locks during reads.
-	fn drain_promotions(&self) {
-		// Limit the number of promotions per call to avoid blocking
-		const MAX_PROMOTIONS: usize = 16;
-
-		for _ in 0..MAX_PROMOTIONS {
-			if let Some(key) = self.promotion_buffer.pop() {
-				let shard_lock = self.get_shard(key.hash);
-
-				// Try to acquire write lock without blocking
-				if let Some(mut shard) = shard_lock.try_write() {
-					shard.promote(&key);
-				} else {
-					// Put it back for later
-					self.promotion_buffer.push(key);
-					break;
-				}
-			} else {
-				break;
-			}
-		}
-	}
 }
 
 // Thread safety: Cache can be shared across threads
@@ -411,11 +345,11 @@ mod tests {
 
 	#[test]
 	fn test_cache_eviction() {
-		// Small cache that will trigger eviction
-		let cache = Cache::new(200);
+		// Small cache that will trigger eviction (use fewer shards for small capacity)
+		let cache = Cache::with_shards(1000, 4);
 
 		// Insert values that exceed capacity
-		for i in 0..10 {
+		for i in 0..15 {
 			let key = TestKey(i);
 			let value = TestValue {
 				data: "x".repeat(50),
@@ -424,8 +358,8 @@ mod tests {
 		}
 
 		// Cache should have evicted some entries
-		assert!(cache.len() < 10);
-		assert!(cache.size() <= 200);
+		assert!(cache.len() < 15, "Cache should have evicted some entries");
+		assert!(cache.size() <= 1000, "Cache size should be <= 1000, got {}", cache.size());
 	}
 
 	#[test]

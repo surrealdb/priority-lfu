@@ -12,28 +12,32 @@ keywords = ["cache", "weighted", "tinylfu", "lfu", "eviction", "priority"]
 categories = ["caching"]
 
 [features]
-default = ["chrono", "uuid"]
+default = ["bytes", "chrono", "geo", "uuid", "regex", "rust_decimal"]
 
 [dependencies]
 parking_lot.workspace = true
-crossbeam-queue.workspace = true
 indexmap.workspace = true
 ahash.workspace = true
+hashbrown = "^0.16"
 weighted-cache-derive.workspace = true
 
 slotmap = { version = "^1", optional = true }
 slab = { version = "^0.4", optional = true }
 arrayvec = { version = "^0.7", optional = true }
 smallvec = { version = "^1", optional = true }
-hashbrown = { version = "^0.16", optional = true }
 chrono = { version = "^0.4", optional = true }
 uuid = { version = "^1.12", optional = true }
+geo = { version = "^0.32", optional = true }
+regex = { version = "^1", optional = true }
+rust_decimal = { version = "^1", optional = true }
+bytes = { version = "^1", optional = true }
 
 [dev-dependencies]
 tokio.workspace = true
 criterion.workspace = true
 proptest.workspace = true
 trybuild.workspace = true
+quick_cache = "0.6"
 
 [[bench]]
 name = "cache_benchmark"

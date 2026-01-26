@@ -143,3 +143,31 @@ mod uuid_impl {
 
 	known_deep_size!(0; Uuid);
 }
+
+#[cfg(feature = "geo")]
+mod geo_impl {
+	use crate::known_deep_size;
+
+	known_deep_size!(0; geo::Point, geo::LineString, geo::Polygon, geo::MultiPoint, geo::MultiLineString, geo::MultiPolygon);
+}
+
+#[cfg(feature = "regex")]
+mod regex_impl {
+	use crate::known_deep_size;
+
+	known_deep_size!(0; regex::Regex);
+}
+
+#[cfg(feature = "rust_decimal")]
+mod rust_decimal_impl {
+	use crate::known_deep_size;
+
+	known_deep_size!(0; rust_decimal::Decimal);
+}
+
+#[cfg(feature = "bytes")]
+mod bytes_impl {
+	use crate::known_deep_size;
+
+	known_deep_size!(0; bytes::Bytes);
+}

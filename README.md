@@ -1,13 +1,13 @@
 # Weighted Cache
 
-A high-performance, concurrent, in-memory cache with **W-TinyLFU** eviction policy and **weight-based** prioritization.
+A high-performance, concurrent, in-memory cache with **Clock-PRO** eviction policy and **weight-based** prioritization.
 
 ## Features
 
-- 🚀 **High Performance**: Sub-microsecond reads with lock-free frequency tracking
+- 🚀 **High Performance**: Sub-microsecond reads with minimal overhead
 - 📏 **Size-Bounded**: Memory limits in bytes, not item count
 - ⚖️ **Weight-Based Eviction**: Prioritize important items regardless of size
-- 🎯 **W-TinyLFU Policy**: Near-optimal hit rates with minimal overhead
+- 🎯 **Clock-PRO Policy**: Scan-resistant eviction with high hit rates
 - 🔒 **Thread-Safe**: Fine-grained sharding for low contention
 - 🔄 **Async-Friendly**: Safe to use in async/await contexts
 - 🎨 **Heterogeneous Storage**: Store different key/value types without enums
@@ -105,32 +105,46 @@ use weighted_cache::CacheBuilder;
 
 let cache = CacheBuilder::new(1024 * 1024 * 512) // 512 MB
     .shards(128)                // More shards = less contention
-    .window_percent(0.02)       // 2% window (default: 1%)
-    .protected_percent(0.75)    // 75% protected (default: 80%)
+    .hot_percent(0.85)          // 85% hot target (default: 90%)
     .build();
 ```
 
 ## How It Works
 
-### W-TinyLFU Algorithm
+### Clock-PRO Algorithm
 
-The cache uses **Window-TinyLFU**, which combines:
+The cache uses **Clock-PRO**, a scan-resistant eviction policy that maintains three key data structures per shard:
 
-1. **Admission Window** (~1%): Captures recent items (LRU)
-2. **TinyLFU Filter**: Probabilistic frequency counter for admission decisions
-3. **SLRU Main Cache**: Segmented LRU (probationary + protected)
+1. **Hot List**: Frequently accessed entries (~90% of capacity by default)
+2. **Cold List**: Recently inserted or demoted entries (~10% of capacity)
+3. **Ghost List**: Recently evicted entry hashes for adaptive promotion
+
+#### Eviction Process
+
+When space is needed, the cache advances a "clock hand" through entries:
+
+- **Cold entries** with reference bit = 0 → evicted (moved to ghost list)
+- **Cold entries** with reference bit > 0 → promoted to hot (reference cleared)
+- **Hot entries** with reference bit = 0 → demoted to cold
+- **Hot entries** with reference bit > 0 → kept hot (reference cleared, moved to back)
+
+Each access increments an entry's reference counter (atomic operation).
 
 ### Weight-Based Eviction
 
-Standard W-TinyLFU evicts by frequency. This implementation adapts it for weights:
+This implementation extends Clock-PRO with **weight-scaled reference counting**:
 
-```
-eviction_score = frequency_estimate / weight
+```rust
+max_references = base_max + weight_bonus
+// Low weight (1-99):      max_ref = 2
+// Medium weight (100-999):  max_ref = 2-3
+// High weight (1000+):      max_ref = 3-4
 ```
 
-Items with **lower scores** are evicted first:
-- Low frequency, low weight → evicted first
-- High frequency, high weight → evicted last
+Higher-weight entries can accumulate more references before eviction, making them more resistant to being removed:
+
+- **Low weight + low access** → evicted quickly
+- **High weight + high access** → highly resistant to eviction
 
 ### Architecture
 
@@ -140,7 +154,7 @@ Items with **lower scores** are evicted first:
 │  ┌─────────────────────────────────┐  │
 │  │ Global State (atomics)          │  │
 │  │ - current_size: AtomicUsize     │  │
-│  │ - frequency_sketch: FreqSketch  │  │
+│  │ - entry_count: AtomicUsize      │  │
 │  └─────────────────────────────────┘  │
 │  ┌──────┐ ┌──────┐      ┌──────┐      │
 │  │Shard0│ │Shard1│ ...  │ShardN│      │
@@ -150,16 +164,16 @@ Items with **lower scores** are evicted first:
 ```
 
 Each shard contains:
-- **Window**: Recent insertions (~1% capacity)
-- **Probationary**: New admissions (~20% of main)
-- **Protected**: Frequently accessed (~80% of main)
+- **Hot List**: Frequently accessed entries (target: ~90% of shard capacity)
+- **Cold List**: New/demoted entries (remaining capacity)
+- **Ghost List**: Hash-only records of recently evicted entries for scan resistance
 
 ## Performance
 
-- **Reads**: Sub-microsecond with lock-free frequency tracking
-- **Writes**: Optimized with deferred promotions and batched evictions
+- **Reads**: Sub-microsecond with atomic reference counting
+- **Writes**: Optimized with adaptive eviction (stops early if pinned entries dominate)
 - **Concurrency**: Default 64 shards for low contention
-- **Memory**: ~128 bytes overhead per entry + sketch (~0.1% of capacity)
+- **Memory**: ~128 bytes overhead per entry, ghost list tracks evicted hashes
 
 ## Thread Safety
 
@@ -210,6 +224,6 @@ For detailed design documentation, see [design/spec.md](design/spec.md).
 
 ## References
 
-- [TinyLFU: A Highly Efficient Cache Admission Policy](https://arxiv.org/abs/1512.00727)
-- [Caffeine](https://github.com/ben-manes/caffeine) - Java implementation
-- [Moka](https://github.com/moka-rs/moka) - Rust W-TinyLFU cache
+- [CLOCK-Pro: An Effective Improvement of the CLOCK Replacement](https://www.usenix.org/legacy/events/usenix05/tech/general/full_papers/jiang/jiang.pdf) - Original paper
+- [quick_cache](https://github.com/arthurprs/quick-cache) - Rust Clock-PRO implementation
+- Size-based capacity management with byte-level tracking
