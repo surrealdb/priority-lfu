@@ -25,7 +25,7 @@ fn bench_insert(c: &mut Criterion) {
 	let mut group = c.benchmark_group("insert");
 
 	for size in [100, 1000, 10000] {
-		group.throughput(Throughput::Elements(size as u64));
+		group.throughput(Throughput::Elements(size));
 		group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
 			b.iter(|| {
 				let cache = Cache::new(1024 * 1024);
@@ -162,7 +162,7 @@ fn bench_concurrent_reads(c: &mut Criterion) {
 			}
 
 			for handle in handles {
-				handle.join().unwrap();
+				handle.join().expect("thread should not panic");
 			}
 		});
 	});
@@ -223,39 +223,31 @@ fn bench_comparison_insert(c: &mut Criterion) {
 	let mut group = c.benchmark_group("comparison/insert");
 
 	for size in [100, 1000, 10000] {
-		group.throughput(Throughput::Elements(size as u64));
-		
-		group.bench_with_input(
-			BenchmarkId::new("weighted_cache", size),
-			&size,
-			|b, &size| {
-				b.iter(|| {
-					let cache = Cache::new(1024 * 1024);
-					for i in 0..size {
-						let key = BenchKey(i);
-						let value = BenchValue {
-							data: vec![0u8; 64],
-						};
-						cache.insert(black_box(key), black_box(value));
-					}
-				});
-			},
-		);
+		group.throughput(Throughput::Elements(size));
 
-		group.bench_with_input(
-			BenchmarkId::new("quick_cache", size),
-			&size,
-			|b, &size| {
-				b.iter(|| {
-					let cache = QuickCache::new(10000);
-					for i in 0..size {
-						let key = i;
-						let value = vec![0u8; 64];
-						cache.insert(black_box(key), black_box(value));
-					}
-				});
-			},
-		);
+		group.bench_with_input(BenchmarkId::new("weighted_cache", size), &size, |b, &size| {
+			b.iter(|| {
+				let cache = Cache::new(1024 * 1024);
+				for i in 0..size {
+					let key = BenchKey(i);
+					let value = BenchValue {
+						data: vec![0u8; 64],
+					};
+					cache.insert(black_box(key), black_box(value));
+				}
+			});
+		});
+
+		group.bench_with_input(BenchmarkId::new("quick_cache", size), &size, |b, &size| {
+			b.iter(|| {
+				let cache = QuickCache::new(10000);
+				for i in 0..size {
+					let key = i;
+					let value = vec![0u8; 64];
+					cache.insert(black_box(key), black_box(value));
+				}
+			});
+		});
 	}
 
 	group.finish();
@@ -393,7 +385,7 @@ fn bench_comparison_concurrent_reads(c: &mut Criterion) {
 			}
 
 			for handle in handles {
-				handle.join().unwrap();
+				handle.join().expect("thread should not panic");
 			}
 		});
 	});
@@ -412,7 +404,7 @@ fn bench_comparison_concurrent_reads(c: &mut Criterion) {
 			}
 
 			for handle in handles {
-				handle.join().unwrap();
+				handle.join().expect("thread should not panic");
 			}
 		});
 	});

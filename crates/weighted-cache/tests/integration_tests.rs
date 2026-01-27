@@ -48,20 +48,20 @@ fn test_basic_operations() {
 
 	// Get with guard
 	{
-		let guard = cache.get(&key).unwrap();
+		let guard = cache.get(&key).expect("key should exist");
 		assert_eq!(*guard, value);
 	}
 
 	// Get with Arc
-	let arc = cache.get_arc(&key).unwrap();
+	let arc = cache.get_arc(&key).expect("key should exist");
 	assert_eq!(*arc, value);
 
 	// Get clone
-	let cloned = cache.get_clone(&key).unwrap();
+	let cloned = cache.get_clone(&key).expect("key should exist");
 	assert_eq!(cloned, value);
 
 	// Remove
-	let removed = cache.remove(&key).unwrap();
+	let removed = cache.remove(&key).expect("key should exist");
 	assert_eq!(*removed, value);
 	assert!(!cache.contains(&key));
 }
@@ -83,10 +83,10 @@ fn test_heterogeneous_types() {
 
 	assert_eq!(cache.len(), 2);
 
-	let str_retrieved = cache.get_arc(&str_key).unwrap();
+	let str_retrieved = cache.get_arc(&str_key).expect("str_key should exist");
 	assert_eq!(*str_retrieved, str_val);
 
-	let int_retrieved = cache.get_arc(&int_key).unwrap();
+	let int_retrieved = cache.get_arc(&int_key).expect("int_key should exist");
 	assert_eq!(*int_retrieved, int_val);
 }
 
@@ -103,9 +103,9 @@ fn test_update_existing() {
 
 	let old = cache.insert(key.clone(), value2.clone());
 	assert!(old.is_some());
-	assert_eq!(*old.unwrap(), value1);
+	assert_eq!(*old.expect("old value should exist"), value1);
 
-	let current = cache.get_arc(&key).unwrap();
+	let current = cache.get_arc(&key).expect("key should exist");
 	assert_eq!(*current, value2);
 }
 
@@ -160,7 +160,10 @@ fn test_frequency_based_eviction() {
 	}
 
 	// Hot key with high priority and high access should still be present
-	assert!(cache.contains(&hot_key), "High-priority frequently accessed entry should survive eviction");
+	assert!(
+		cache.contains(&hot_key),
+		"High-priority frequently accessed entry should survive eviction"
+	);
 }
 
 #[test]
@@ -187,7 +190,7 @@ fn test_concurrent_reads() {
 	}
 
 	for handle in handles {
-		handle.join().unwrap();
+		handle.join().expect("thread should not panic");
 	}
 }
 
@@ -208,7 +211,7 @@ fn test_concurrent_writes() {
 	}
 
 	for handle in handles {
-		handle.join().unwrap();
+		handle.join().expect("thread should not panic");
 	}
 
 	assert_eq!(cache.len(), 100);
@@ -249,10 +252,10 @@ fn test_concurrent_mixed_operations() {
 	}
 
 	for handle in handles {
-		handle.join().unwrap();
+		handle.join().expect("thread should not panic");
 	}
 
-	assert!(cache.len() > 0);
+	assert!(!cache.is_empty());
 }
 
 #[test]
@@ -272,13 +275,13 @@ fn test_clear() {
 	assert!(cache.is_empty());
 }
 
-	#[test]
-	fn test_builder() {
-		let cache = CacheBuilder::new(1024).shards(32).build();
+#[test]
+fn test_builder() {
+	let cache = CacheBuilder::new(1024).shards(32).build();
 
-		cache.insert(IntKey(1), IntValue(100));
-		assert!(cache.contains(&IntKey(1)));
-	}
+	cache.insert(IntKey(1), IntValue(100));
+	assert!(cache.contains(&IntKey(1)));
+}
 
 #[test]
 fn test_large_values() {
@@ -289,9 +292,9 @@ fn test_large_values() {
 		data: "x".repeat(100_000), // 100 KB
 	};
 
-	cache.insert(key.clone(), value.clone());
+	cache.insert(key.clone(), value);
 
-	let retrieved = cache.get_arc(&key).unwrap();
+	let retrieved = cache.get_arc(&key).expect("key should exist");
 	assert_eq!(retrieved.data.len(), 100_000);
 }
 

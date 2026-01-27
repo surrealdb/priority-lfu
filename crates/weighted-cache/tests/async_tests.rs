@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use tokio;
 /// Tests for async usage patterns.
 use weighted_cache::{Cache, CacheKey, DeepSizeOf};
 
@@ -72,7 +71,7 @@ async fn test_guard_scoped_correctly() {
 
 	// ✅ Correct: Use guard in a tight scope, extract data, then await
 	let extracted_data = {
-		let guard = cache.get(&key).unwrap();
+		let guard = cache.get(&key).expect("key should exist");
 		guard.data.clone()
 	}; // Guard is dropped here
 
@@ -112,7 +111,7 @@ async fn test_concurrent_async_tasks() {
 	}
 
 	for handle in handles {
-		handle.await.unwrap();
+		handle.await.expect("task should not panic");
 	}
 }
 
@@ -142,6 +141,6 @@ async fn test_async_insert_and_get() {
 		.collect();
 
 	for task in tasks {
-		task.await.unwrap();
+		task.await.expect("task should not panic");
 	}
 }

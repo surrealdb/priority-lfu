@@ -11,16 +11,16 @@ pub enum CachePolicy {
 	/// Critical metadata that should persist (catalog, schemas, indexes).
 	/// Last to be evicted, highest retention.
 	Critical = 0,
-	
+
 	/// Important data with high reuse (active transaction records, hot tables).
 	/// Strong retention, evicted reluctantly.
 	Durable = 1,
-	
+
 	/// Standard cacheable data (recent queries, lookup results).
 	/// Normal eviction behavior.
 	#[default]
 	Standard = 2,
-	
+
 	/// Temporary or easily recomputed data (intermediate results, aggregations).
 	/// First to be evicted.
 	Volatile = 3,

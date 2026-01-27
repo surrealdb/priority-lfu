@@ -181,9 +181,10 @@ impl Entry {
 
 #[cfg(test)]
 mod tests {
+	use std::sync::atomic::Ordering;
+
 	use super::*;
 	use crate::DeepSizeOf;
-	use std::sync::atomic::Ordering;
 
 	#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 	struct TestKey(u64);
@@ -204,7 +205,7 @@ mod tests {
 
 		assert_eq!(erased.type_id, TypeId::of::<TestKey>());
 		assert!(erased.downcast_ref::<TestKey>().is_some());
-		assert_eq!(erased.downcast_ref::<TestKey>().unwrap(), &TestKey(42));
+		assert_eq!(erased.downcast_ref::<TestKey>().expect("should downcast"), &TestKey(42));
 	}
 
 	#[test]

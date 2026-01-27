@@ -33,8 +33,6 @@ pub struct Cache {
 	current_size: AtomicUsize,
 	/// Total entry count
 	entry_count: AtomicUsize,
-	/// Maximum size in bytes
-	max_size: usize,
 	/// Number of shards
 	shard_count: usize,
 }
@@ -59,15 +57,12 @@ impl Cache {
 		let size_per_shard = max_size_bytes / shard_count;
 
 		// Create shards
-		let shards = (0..shard_count)
-			.map(|_| RwLock::new(Shard::new(size_per_shard)))
-			.collect();
+		let shards = (0..shard_count).map(|_| RwLock::new(Shard::new(size_per_shard))).collect();
 
 		Self {
 			shards,
 			current_size: AtomicUsize::new(0),
 			entry_count: AtomicUsize::new(0),
-			max_size: max_size_bytes,
 			shard_count,
 		}
 	}
@@ -134,7 +129,7 @@ impl Cache {
 	/// This method performs a zero-allocation hash table lookup and atomically
 	/// increments the reference counter for Clock-PRO.
 	pub fn get<K: CacheKey>(&self, key: &K) -> Option<Guard<'_, K::Value>> {
-		let key_ref = ErasedKeyRef::new(key);  // Zero allocation
+		let key_ref = ErasedKeyRef::new(key); // Zero allocation
 		let shard_lock = self.get_shard(key_ref.hash);
 
 		// Acquire read lock
@@ -162,12 +157,12 @@ impl Cache {
 	/// This method performs a zero-allocation hash table lookup, clones an `Arc`
 	/// pointer (not the underlying value), and atomically increments the reference counter.
 	pub fn get_arc<K: CacheKey>(&self, key: &K) -> Option<Arc<K::Value>> {
-		let key_ref = ErasedKeyRef::new(key);  // Zero allocation
+		let key_ref = ErasedKeyRef::new(key); // Zero allocation
 		let shard_lock = self.get_shard(key_ref.hash);
 
 		// Short-lived read lock
 		let shard = shard_lock.read();
-		let entry = shard.get_ref(&key_ref)?;  // Zero-allocation lookup
+		let entry = shard.get_ref(&key_ref)?; // Zero-allocation lookup
 		let arc = entry.value_arc::<K::Value>()?;
 
 		Some(arc)
@@ -217,10 +212,10 @@ impl Cache {
 
 	/// Check if a key exists (zero allocation).
 	pub fn contains<K: CacheKey>(&self, key: &K) -> bool {
-		let key_ref = ErasedKeyRef::new(key);  // Zero allocation
+		let key_ref = ErasedKeyRef::new(key); // Zero allocation
 		let shard_lock = self.get_shard(key_ref.hash);
 		let shard = shard_lock.read();
-		
+
 		// Use get_ref for zero-allocation lookup
 		shard.get_ref(&key_ref).is_some()
 	}
@@ -262,7 +257,6 @@ impl Cache {
 		let index = (hash as usize) & (self.shard_count - 1);
 		&self.shards[index]
 	}
-
 }
 
 // Thread safety: Cache can be shared across threads
@@ -297,7 +291,7 @@ mod tests {
 
 		cache.insert(key.clone(), value.clone());
 
-		let retrieved = cache.get_arc(&key).unwrap();
+		let retrieved = cache.get_arc(&key).expect("key should exist");
 		assert_eq!(*retrieved, value);
 	}
 
@@ -313,7 +307,7 @@ mod tests {
 		cache.insert(key.clone(), value.clone());
 		assert!(cache.contains(&key));
 
-		let removed = cache.remove(&key).unwrap();
+		let removed = cache.remove(&key).expect("key should exist");
 		assert_eq!(*removed, value);
 		assert!(!cache.contains(&key));
 	}
@@ -363,10 +357,10 @@ mod tests {
 		}
 
 		for handle in handles {
-			handle.join().unwrap();
+			handle.join().expect("thread should not panic");
 		}
 
-		assert!(cache.len() > 0);
+		assert!(!cache.is_empty());
 	}
 
 	#[test]

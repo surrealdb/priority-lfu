@@ -68,9 +68,7 @@ mod tests {
 
 	#[test]
 	fn test_builder_full_config() {
-		let cache = CacheBuilder::new(10240)
-			.shards(32)
-			.build();
+		let cache = CacheBuilder::new(10240).shards(32).build();
 
 		assert!(cache.is_empty());
 		assert_eq!(cache.size(), 0);

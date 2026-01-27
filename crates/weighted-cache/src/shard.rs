@@ -162,6 +162,7 @@ impl Shard {
 	}
 
 	/// Get an entry by key, updating clock bit and frequency.
+	#[cfg(test)]
 	pub fn get(&self, key: &ErasedKey) -> Option<&Entry> {
 		let entry = self.entries.get(key)?;
 		// Set clock bit
@@ -174,7 +175,8 @@ impl Shard {
 	/// Get an entry by borrowed key reference (zero allocation).
 	pub fn get_ref<K: crate::traits::CacheKey>(&self, key_ref: &ErasedKeyRef<K>) -> Option<&Entry> {
 		// Use raw_entry to search with pre-computed hash
-		let (_key, entry) = self.entries
+		let (_key, entry) = self
+			.entries
 			.raw_entry()
 			.from_hash(key_ref.hash, |stored_key| key_ref.equals(stored_key))?;
 
@@ -199,6 +201,7 @@ impl Shard {
 	}
 
 	/// Check if shard contains a key.
+	#[cfg(test)]
 	pub fn contains(&self, key: &ErasedKey) -> bool {
 		self.entries.contains_key(key)
 	}
@@ -235,24 +238,24 @@ impl Shard {
 	/// Try to evict one entry from a specific bucket using clock algorithm.
 	fn evict_from_bucket(&mut self, policy_idx: usize) -> Option<usize> {
 		let bucket = &mut self.buckets[policy_idx];
-		
+
 		if bucket.is_empty() {
 			return None;
 		}
 
 		let bucket_len = bucket.len();
-		
+
 		// Do a full sweep of the clock
 		for _ in 0..bucket_len {
 			// Get key at current hand position
 			let key = bucket.list.get_index(bucket.hand)?.0.clone();
-			
+
 			// Get the entry
 			let entry = self.entries.get(&key)?;
-			
+
 			let clock_bit = entry.clock_bit.load(Ordering::Relaxed);
 			let frequency = entry.frequency.load(Ordering::Relaxed);
-			
+
 			if clock_bit {
 				// Clear clock bit and advance
 				entry.clock_bit.store(false, Ordering::Relaxed);
@@ -270,7 +273,7 @@ impl Shard {
 				bucket.hand = (bucket.hand + 1) % bucket_len;
 			}
 		}
-		
+
 		// If we've done a full sweep and found nothing, evict the entry at the hand
 		// (this handles the case where all entries have references or high frequency)
 		let key = bucket.list.get_index(bucket.hand)?.0.clone();
@@ -280,7 +283,6 @@ impl Shard {
 		self.size_current -= evicted_size;
 		Some(evicted_size)
 	}
-
 }
 
 #[cfg(test)]
@@ -353,11 +355,11 @@ mod tests {
 		shard.insert(key.clone(), entry);
 
 		// Get should set clock bit and increment frequency
-		let e = shard.get(&key).unwrap();
+		let e = shard.get(&key).expect("entry should exist");
 		assert_eq!(e.clock_bit.load(Ordering::Relaxed), true);
 		assert_eq!(e.frequency.load(Ordering::Relaxed), 1);
 
-		let e = shard.get(&key).unwrap();
+		let e = shard.get(&key).expect("entry should exist");
 		assert_eq!(e.clock_bit.load(Ordering::Relaxed), true);
 		assert_eq!(e.frequency.load(Ordering::Relaxed), 2);
 	}
@@ -372,7 +374,7 @@ mod tests {
 		let entry = make_entry(50, CachePolicy::Standard);
 		let erased = ErasedKey::new(&key);
 		let hash = erased.hash;
-		shard.insert(erased.clone(), entry);
+		shard.insert(erased, entry);
 
 		// Verify entry exists
 		assert_eq!(shard.entries.len(), 1, "Should have 1 entry");
@@ -382,14 +384,11 @@ mod tests {
 		assert_eq!(key_ref.hash, hash, "Hashes should match");
 
 		// Get using borrowed reference should work
-		let e = shard.get_ref(&key_ref);
-		assert!(e.is_some(), "get_ref should find the entry");
-		
-		let e = e.unwrap();
+		let e = shard.get_ref(&key_ref).expect("get_ref should find the entry");
 		assert_eq!(e.clock_bit.load(Ordering::Relaxed), true);
 		assert_eq!(e.frequency.load(Ordering::Relaxed), 1);
 
-		let e = shard.get_ref(&key_ref).unwrap();
+		let e = shard.get_ref(&key_ref).expect("entry should exist");
 		assert_eq!(e.frequency.load(Ordering::Relaxed), 2);
 	}
 
@@ -400,15 +399,15 @@ mod tests {
 		// Insert entries with different policies
 		let volatile_key = make_key(1, CachePolicy::Volatile);
 		let volatile_entry = make_entry(50, CachePolicy::Volatile);
-		shard.insert(volatile_key.clone(), volatile_entry);
+		shard.insert(volatile_key, volatile_entry);
 
 		let standard_key = make_key(2, CachePolicy::Standard);
 		let standard_entry = make_entry(50, CachePolicy::Standard);
-		shard.insert(standard_key.clone(), standard_entry);
+		shard.insert(standard_key, standard_entry);
 
 		let durable_key = make_key(3, CachePolicy::Durable);
 		let durable_entry = make_entry(50, CachePolicy::Durable);
-		shard.insert(durable_key.clone(), durable_entry);
+		shard.insert(durable_key, durable_entry);
 
 		// Fill to trigger eviction - volatile should be evicted first
 		for i in 10..15 {
@@ -434,7 +433,7 @@ mod tests {
 			shard.get(&key);
 		}
 
-		let e = shard.entries.get(&key).unwrap();
+		let e = shard.entries.get(&key).expect("entry should exist");
 		assert!(e.frequency.load(Ordering::Relaxed) >= 5);
 
 		// Clock bit should be set
