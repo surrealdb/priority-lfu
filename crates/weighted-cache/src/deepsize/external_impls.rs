@@ -84,7 +84,6 @@ mod smallvec_impl {
 	}
 }
 
-#[cfg(feature = "hashbrown")]
 mod hashbrown_impl {
 	use core::mem::size_of;
 

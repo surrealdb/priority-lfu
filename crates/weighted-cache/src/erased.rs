@@ -1,31 +1,10 @@
 use std::any::{Any, TypeId};
-use std::convert::TryFrom;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, AtomicU16, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8};
 
 use crate::deepsize::DeepSizeOf;
-use crate::traits::CacheKey;
-
-/// Entry state for Clock-PRO algorithm.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum ResidentState {
-	Hot = 0,
-	Cold = 1,
-}
-
-impl TryFrom<u8> for ResidentState {
-	type Error = u8;
-
-	fn try_from(val: u8) -> Result<Self, Self::Error> {
-		match val {
-			0 => Ok(ResidentState::Hot),
-			1 => Ok(ResidentState::Cold),
-			_ => Err(val),
-		}
-	}
-}
+use crate::traits::{CacheKey, CachePolicy};
 
 /// Type-erased cache key with pre-computed hash.
 ///
@@ -166,26 +145,26 @@ pub struct Entry {
 	pub value: Arc<dyn Any + Send + Sync>,
 	/// Cached deep_size() result (immutable after creation)
 	pub size: usize,
-	/// Cached weight() result (immutable after creation)
-	pub weight: u64,
-	/// Clock-PRO state (Hot or Cold)
-	pub state: AtomicU8,
-	/// Reference counter for Clock-PRO (0-2)
-	pub referenced: AtomicU16,
+	/// Cached policy() result (immutable after creation)
+	pub policy: CachePolicy,
+	/// LFU frequency counter (0-255)
+	pub frequency: AtomicU8,
+	/// Clock reference bit
+	pub clock_bit: AtomicBool,
 }
 
 impl Entry {
-	/// Create a new entry from a concrete value with the given weight.
+	/// Create a new entry from a concrete value with the given policy.
 	///
-	/// The weight determines eviction priority (higher = more resistant to eviction).
-	pub fn new<V: DeepSizeOf + Send + Sync + 'static>(value: V, weight: u64) -> Self {
+	/// The policy determines eviction priority (lower discriminant = more resistant to eviction).
+	pub fn new<V: DeepSizeOf + Send + Sync + 'static>(value: V, policy: CachePolicy) -> Self {
 		let size = value.deep_size_of();
 		Self {
 			size,
-			weight,
+			policy,
 			value: Arc::new(value),
-			state: AtomicU8::new(ResidentState::Cold as u8),
-			referenced: AtomicU16::new(0),
+			frequency: AtomicU8::new(0),
+			clock_bit: AtomicBool::new(false),
 		}
 	}
 
@@ -198,43 +177,19 @@ impl Entry {
 		// Downcast to concrete type
 		Arc::downcast::<V>(arc_any).ok()
 	}
-
-	/// Get the current state.
-	pub fn get_state(&self) -> ResidentState {
-		let val = self.state.load(Ordering::Acquire);
-		ResidentState::try_from(val).expect("Invalid state value stored in atomic")
-	}
-
-	/// Set the state atomically.
-	pub fn set_state(&self, state: ResidentState) {
-		self.state.store(state as u8, Ordering::Release);
-	}
-
-	/// Get reference counter value.
-	pub fn get_referenced(&self) -> u16 {
-		self.referenced.load(Ordering::Acquire)
-	}
-
-	/// Set reference counter value.
-	pub fn set_referenced(&self, val: u16) {
-		self.referenced.store(val, Ordering::Release);
-	}
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
 	use crate::DeepSizeOf;
+	use std::sync::atomic::Ordering;
 
 	#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 	struct TestKey(u64);
 
 	impl CacheKey for TestKey {
 		type Value = TestValue;
-
-		fn weight(&self) -> u64 {
-			50
-		}
 	}
 
 	#[derive(DeepSizeOf)]
@@ -269,12 +224,12 @@ mod tests {
 		let value = TestValue {
 			data: vec![1, 2, 3, 4],
 		};
-		let entry = Entry::new(value, 50);
+		let entry = Entry::new(value, CachePolicy::Standard);
 
-		assert_eq!(entry.weight, 50);
+		assert_eq!(entry.policy, CachePolicy::Standard);
 		assert!(entry.size > 0);
-		assert_eq!(entry.get_state(), ResidentState::Cold);
-		assert_eq!(entry.get_referenced(), 0);
+		assert_eq!(entry.frequency.load(Ordering::Relaxed), 0);
+		assert_eq!(entry.clock_bit.load(Ordering::Relaxed), false);
 	}
 
 	#[test]
@@ -282,7 +237,7 @@ mod tests {
 		let value = TestValue {
 			data: vec![1, 2, 3, 4],
 		};
-		let entry = Entry::new(value, 50);
+		let entry = Entry::new(value, CachePolicy::Standard);
 
 		let arc = entry.value_arc::<TestValue>();
 		assert!(arc.is_some());
@@ -292,34 +247,34 @@ mod tests {
 	}
 
 	#[test]
-	fn test_state_transitions() {
+	fn test_clock_bit() {
 		let value = TestValue {
 			data: vec![1, 2, 3],
 		};
-		let entry = Entry::new(value, 50);
+		let entry = Entry::new(value, CachePolicy::Standard);
 
-		assert_eq!(entry.get_state(), ResidentState::Cold);
+		assert_eq!(entry.clock_bit.load(Ordering::Relaxed), false);
 
-		entry.set_state(ResidentState::Hot);
-		assert_eq!(entry.get_state(), ResidentState::Hot);
+		entry.clock_bit.store(true, Ordering::Relaxed);
+		assert_eq!(entry.clock_bit.load(Ordering::Relaxed), true);
 
-		entry.set_state(ResidentState::Cold);
-		assert_eq!(entry.get_state(), ResidentState::Cold);
+		entry.clock_bit.store(false, Ordering::Relaxed);
+		assert_eq!(entry.clock_bit.load(Ordering::Relaxed), false);
 	}
 
 	#[test]
-	fn test_referenced_counter() {
+	fn test_frequency_counter() {
 		let value = TestValue {
 			data: vec![1, 2, 3],
 		};
-		let entry = Entry::new(value, 50);
+		let entry = Entry::new(value, CachePolicy::Standard);
 
-		assert_eq!(entry.get_referenced(), 0);
+		assert_eq!(entry.frequency.load(Ordering::Relaxed), 0);
 
-		entry.set_referenced(1);
-		assert_eq!(entry.get_referenced(), 1);
+		entry.frequency.store(5, Ordering::Relaxed);
+		assert_eq!(entry.frequency.load(Ordering::Relaxed), 5);
 
-		entry.set_referenced(2);
-		assert_eq!(entry.get_referenced(), 2);
+		entry.frequency.store(255, Ordering::Relaxed);
+		assert_eq!(entry.frequency.load(Ordering::Relaxed), 255);
 	}
 }

@@ -2,15 +2,15 @@
 //!
 //! A high-performance, concurrent, in-memory cache with:
 //! - **Size-bounded capacity** (bytes, not item count)
-//! - **Weight-based eviction** (separate from size)
+//! - **Policy-based eviction** (separate from size)
 //! - **Heterogeneous storage** (multiple key/value types without a unified enum)
-//! - **Clock-PRO eviction policy** for scan resistance and high hit rates
+//! - **Weight-stratified clock eviction** for predictable priority-based eviction
 //! - **Read-optimized concurrency** via fine-grained sharding
 //!
 //! ## Quick Start
 //!
 //! ```rust
-//! use weighted_cache::{DeepSizeOf, Cache, CacheKey};
+//! use weighted_cache::{DeepSizeOf, Cache, CacheKey, CachePolicy};
 //! use std::sync::Arc;
 //!
 //! // Define your key type
@@ -28,8 +28,8 @@
 //! impl CacheKey for UserId {
 //!     type Value = UserProfile;
 //!
-//!     fn weight(&self) -> u64 {
-//!         100 // Higher weight = more resistant to eviction
+//!     fn policy(&self) -> CachePolicy {
+//!         CachePolicy::Standard // Default eviction priority
 //!     }
 //! }
 //!
@@ -102,5 +102,5 @@ pub use builder::CacheBuilder;
 pub use cache::Cache;
 pub use deepsize::{Context, DeepSizeOf};
 pub use guard::Guard;
-pub use traits::CacheKey;
+pub use traits::{CacheKey, CachePolicy};
 pub use weighted_cache_derive::*;

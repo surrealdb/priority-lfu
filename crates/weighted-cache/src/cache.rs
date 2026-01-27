@@ -52,36 +52,15 @@ impl Cache {
 	/// More shards reduce contention but increase memory overhead.
 	/// Recommended: `num_cpus * 8` to `num_cpus * 16`.
 	pub fn with_shards(max_size_bytes: usize, shard_count: usize) -> Self {
-		Self::with_config(max_size_bytes, shard_count, 0.9)
-	}
-
-	/// Create with full custom configuration.
-	///
-	/// # Arguments
-	///
-	/// * `max_size_bytes` - Maximum cache size in bytes
-	/// * `shard_count` - Number of shards (will be rounded to next power of 2)
-	/// * `hot_percent` - Target percentage of capacity for hot entries (e.g., 0.9 = 90%)
-	///
-	/// This is primarily used by `CacheBuilder`. Most users should use `new()` or `with_shards()`.
-	pub fn with_config(
-		max_size_bytes: usize,
-		shard_count: usize,
-		hot_percent: f32,
-	) -> Self {
 		// Ensure shard_count is a power of 2 for efficient masking
 		let shard_count = shard_count.next_power_of_two().max(4);
 
 		// Divide capacity per shard
 		let size_per_shard = max_size_bytes / shard_count;
-		
-		// Estimate ghost capacity (roughly half of estimated items)
-		let estimated_items = max_size_bytes / 100; // Rough estimate
-		let ghost_per_shard = estimated_items / (shard_count * 2);
 
 		// Create shards
 		let shards = (0..shard_count)
-			.map(|_| RwLock::new(Shard::new(size_per_shard, hot_percent, ghost_per_shard)))
+			.map(|_| RwLock::new(Shard::new(size_per_shard)))
 			.collect();
 
 		Self {
@@ -105,8 +84,8 @@ impl Cache {
 	/// Eviction happens via clock hand advancement within the shard.
 	pub fn insert<K: CacheKey>(&self, key: K, value: K::Value) -> Option<Arc<K::Value>> {
 		let erased_key = ErasedKey::new(&key);
-		let weight = key.weight();
-		let entry = Entry::new(value, weight);
+		let policy = key.policy();
+		let entry = Entry::new(value, policy);
 		let entry_size = entry.size;
 
 		// Get the shard
@@ -300,10 +279,6 @@ mod tests {
 
 	impl CacheKey for TestKey {
 		type Value = TestValue;
-
-		fn weight(&self) -> u64 {
-			50
-		}
 	}
 
 	#[derive(Clone, Debug, PartialEq, DeepSizeOf)]

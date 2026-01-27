@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::thread;
 
-use weighted_cache::{Cache, CacheBuilder, CacheKey, DeepSizeOf};
+use weighted_cache::{Cache, CacheBuilder, CacheKey, CachePolicy, DeepSizeOf};
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
 struct StringKey(String);
@@ -9,8 +9,8 @@ struct StringKey(String);
 impl CacheKey for StringKey {
 	type Value = StringValue;
 
-	fn weight(&self) -> u64 {
-		100
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Standard
 	}
 }
 
@@ -25,8 +25,8 @@ struct IntKey(u64);
 impl CacheKey for IntKey {
 	type Value = IntValue;
 
-	fn weight(&self) -> u64 {
-		50
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Standard
 	}
 }
 
@@ -140,8 +140,8 @@ fn test_frequency_based_eviction() {
 	impl CacheKey for HighWeightKey {
 		type Value = IntValue;
 
-		fn weight(&self) -> u64 {
-			1000 // High weight = max_ref of 3
+		fn policy(&self) -> CachePolicy {
+			CachePolicy::Critical // High priority
 		}
 	}
 
@@ -159,8 +159,8 @@ fn test_frequency_based_eviction() {
 		cache.insert(IntKey(i), IntValue(i as i64));
 	}
 
-	// Hot key with high weight and high access should still be present
-	assert!(cache.contains(&hot_key), "High-weight frequently accessed entry should survive eviction");
+	// Hot key with high priority and high access should still be present
+	assert!(cache.contains(&hot_key), "High-priority frequently accessed entry should survive eviction");
 }
 
 #[test]
@@ -272,14 +272,13 @@ fn test_clear() {
 	assert!(cache.is_empty());
 }
 
-#[test]
-fn test_builder() {
-	let cache =
-		CacheBuilder::new(1024).shards(32).hot_percent(0.85).build();
+	#[test]
+	fn test_builder() {
+		let cache = CacheBuilder::new(1024).shards(32).build();
 
-	cache.insert(IntKey(1), IntValue(100));
-	assert!(cache.contains(&IntKey(1)));
-}
+		cache.insert(IntKey(1), IntValue(100));
+		assert!(cache.contains(&IntKey(1)));
+	}
 
 #[test]
 fn test_large_values() {
@@ -297,47 +296,47 @@ fn test_large_values() {
 }
 
 #[test]
-fn test_weighted_eviction() {
+fn test_policy_based_eviction() {
 	let cache = Cache::new(1000);
 
-	// High weight value (more resistant to eviction)
+	// High priority value (more resistant to eviction)
 	#[derive(Hash, Eq, PartialEq, Clone, Debug)]
-	struct HighWeightKey(u64);
+	struct CriticalKey(u64);
 
-	impl CacheKey for HighWeightKey {
-		type Value = HighWeightValue;
+	impl CacheKey for CriticalKey {
+		type Value = CriticalValue;
 
-		fn weight(&self) -> u64 {
-			1000 // Very high weight
+		fn policy(&self) -> CachePolicy {
+			CachePolicy::Critical
 		}
 	}
 
 	#[derive(Clone, Debug, PartialEq, DeepSizeOf)]
-	struct HighWeightValue;
+	struct CriticalValue;
 
-	// Low weight value (easily evicted)
+	// Low priority value (easily evicted)
 	#[derive(Hash, Eq, PartialEq, Clone, Debug)]
-	struct LowWeightKey(u64);
+	struct VolatileKey(u64);
 
-	impl CacheKey for LowWeightKey {
-		type Value = LowWeightValue;
+	impl CacheKey for VolatileKey {
+		type Value = VolatileValue;
 
-		fn weight(&self) -> u64 {
-			1 // Very low weight
+		fn policy(&self) -> CachePolicy {
+			CachePolicy::Volatile
 		}
 	}
 
 	#[derive(Clone, Debug, PartialEq, DeepSizeOf)]
-	struct LowWeightValue;
+	struct VolatileValue;
 
-	cache.insert(HighWeightKey(1), HighWeightValue);
-	cache.insert(LowWeightKey(2), LowWeightValue);
+	cache.insert(CriticalKey(1), CriticalValue);
+	cache.insert(VolatileKey(2), VolatileValue);
 
 	// Fill cache to trigger eviction
 	for i in 10..20 {
 		cache.insert(IntKey(i), IntValue(i as i64));
 	}
 
-	// High weight item should be more likely to survive
+	// Critical item should be more likely to survive
 	// Note: This is probabilistic, so we can't guarantee it in a single test
 }

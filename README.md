@@ -1,13 +1,13 @@
 # Weighted Cache
 
-A high-performance, concurrent, in-memory cache with **Clock-PRO** eviction policy and **weight-based** prioritization.
+A high-performance, concurrent, in-memory cache with **weight-stratified clock** eviction policy and **policy-based** prioritization.
 
 ## Features
 
 - 🚀 **High Performance**: Sub-microsecond reads with minimal overhead
 - 📏 **Size-Bounded**: Memory limits in bytes, not item count
-- ⚖️ **Weight-Based Eviction**: Prioritize important items regardless of size
-- 🎯 **Clock-PRO Policy**: Scan-resistant eviction with high hit rates
+- ⚖️ **Policy-Based Eviction**: Prioritize important items with 4 eviction tiers
+- 🎯 **Weight-Stratified Clock**: Predictable priority-based eviction with frequency tracking
 - 🔒 **Thread-Safe**: Fine-grained sharding for low contention
 - 🔄 **Async-Friendly**: Safe to use in async/await contexts
 - 🎨 **Heterogeneous Storage**: Store different key/value types without enums
@@ -24,7 +24,7 @@ weighted-cache = "0.1"
 Basic usage:
 
 ```rust
-use weighted_cache::{Cache, CacheKey, DeepSizeOf};
+use weighted_cache::{Cache, CacheKey, CachePolicy, DeepSizeOf};
 
 // Define your key type
 #[derive(Hash, Eq, PartialEq, Clone)]
@@ -41,10 +41,19 @@ struct UserData {
 impl CacheKey for UserId {
     type Value = UserData;
 
-    fn weight(&self) -> u64 {
-        // Higher weight = more resistant to eviction
-        // Example: VIP users get higher weight based on ID
-        if self.0 < 1000 { 200 } else { 50 }
+    fn policy(&self) -> CachePolicy {
+        // Different eviction priorities:
+        // Critical - last to be evicted (metadata, schemas)
+        // Durable - strong retention (active records)
+        // Standard - normal eviction (default)
+        // Volatile - first to be evicted (temp data)
+        
+        // Example: VIP users get higher priority based on ID
+        if self.0 < 1000 { 
+            CachePolicy::Durable 
+        } else { 
+            CachePolicy::Standard 
+        }
     }
 }
 
@@ -105,46 +114,52 @@ use weighted_cache::CacheBuilder;
 
 let cache = CacheBuilder::new(1024 * 1024 * 512) // 512 MB
     .shards(128)                // More shards = less contention
-    .hot_percent(0.85)          // 85% hot target (default: 90%)
     .build();
 ```
 
 ## How It Works
 
-### Clock-PRO Algorithm
+### Weight-Stratified Clock Algorithm
 
-The cache uses **Clock-PRO**, a scan-resistant eviction policy that maintains three key data structures per shard:
+The cache uses a **weight-stratified clock** eviction policy that maintains four priority buckets per shard:
 
-1. **Hot List**: Frequently accessed entries (~90% of capacity by default)
-2. **Cold List**: Recently inserted or demoted entries (~10% of capacity)
-3. **Ghost List**: Recently evicted entry hashes for adaptive promotion
+1. **Critical Bucket** (CachePolicy::Critical): Metadata, schemas, indexes - last to evict
+2. **Durable Bucket** (CachePolicy::Durable): Active records, hot tables - strong retention
+3. **Standard Bucket** (CachePolicy::Standard): Normal cacheable data - default priority
+4. **Volatile Bucket** (CachePolicy::Volatile): Temp data, intermediate results - first to evict
 
 #### Eviction Process
 
-When space is needed, the cache advances a "clock hand" through entries:
+When space is needed, the cache uses a clock sweep starting from the lowest priority bucket:
 
-- **Cold entries** with reference bit = 0 → evicted (moved to ghost list)
-- **Cold entries** with reference bit > 0 → promoted to hot (reference cleared)
-- **Hot entries** with reference bit = 0 → demoted to cold
-- **Hot entries** with reference bit > 0 → kept hot (reference cleared, moved to back)
+1. Start with **Volatile** bucket, advance clock hand
+2. For each entry encountered:
+   - If **clock_bit** is set → clear it and advance
+   - If **clock_bit** is clear and **frequency** = 0 → **evict**
+   - If **clock_bit** is clear and **frequency** > 0 → decrement frequency and advance
+3. If bucket is empty, move to next higher priority bucket (Standard → Durable → Critical)
 
-Each access increments an entry's reference counter (atomic operation).
+Each access sets the clock_bit and increments frequency (saturating at 255).
 
-### Weight-Based Eviction
+### Policy-Based Eviction
 
-This implementation extends Clock-PRO with **weight-scaled reference counting**:
+This design provides **predictable priority-based eviction**:
 
 ```rust
-max_references = base_max + weight_bonus
-// Low weight (1-99):      max_ref = 2
-// Medium weight (100-999):  max_ref = 2-3
-// High weight (1000+):      max_ref = 3-4
+// Eviction order: Volatile → Standard → Durable → Critical
+// Within each bucket: Clock sweep with LFU tie-breaking
+
+CachePolicy::Volatile   // Evicted first
+CachePolicy::Standard   // Normal eviction
+CachePolicy::Durable    // Strong retention
+CachePolicy::Critical   // Evicted last
 ```
 
-Higher-weight entries can accumulate more references before eviction, making them more resistant to being removed:
+Benefits:
 
-- **Low weight + low access** → evicted quickly
-- **High weight + high access** → highly resistant to eviction
+- **Predictable**: Lower priority items always evicted before higher priority
+- **Fast**: Only scans entries in the lowest-priority non-empty bucket
+- **Simple**: No complex hot/cold promotion logic
 
 ### Architecture
 
@@ -164,16 +179,16 @@ Higher-weight entries can accumulate more references before eviction, making the
 ```
 
 Each shard contains:
-- **Hot List**: Frequently accessed entries (target: ~90% of shard capacity)
-- **Cold List**: New/demoted entries (remaining capacity)
-- **Ghost List**: Hash-only records of recently evicted entries for scan resistance
+- **Policy Buckets**: Four priority buckets (Critical, Durable, Standard, Volatile)
+- **Clock Hands**: One per bucket for efficient clock sweep
+- **Entry Map**: HashMap with pre-computed hashes for O(1) lookup
 
 ## Performance
 
-- **Reads**: Sub-microsecond with atomic reference counting
-- **Writes**: Optimized with adaptive eviction (stops early if pinned entries dominate)
+- **Reads**: Sub-microsecond with atomic clock_bit and frequency updates
+- **Writes**: Fast eviction by scanning only lowest priority bucket
 - **Concurrency**: Default 64 shards for low contention
-- **Memory**: ~128 bytes overhead per entry, ghost list tracks evicted hashes
+- **Memory**: ~96 bytes overhead per entry (no ghost list needed)
 
 ## Thread Safety
 

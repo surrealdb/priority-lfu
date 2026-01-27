@@ -1,6 +1,6 @@
-use weighted_cache::{Cache, CacheKey, DeepSizeOf};
+use weighted_cache::{Cache, CacheKey, CachePolicy, DeepSizeOf};
 
-/// Example demonstrating how different keys can have different weights
+/// Example demonstrating how different keys can have different eviction policies
 /// for the same value type.
 
 #[derive(Clone, Debug, PartialEq, DeepSizeOf)]
@@ -16,8 +16,8 @@ struct PremiumUserId(u64);
 impl CacheKey for PremiumUserId {
 	type Value = UserProfile;
 
-	fn weight(&self) -> u64 {
-		1000 // Very high weight - resistant to eviction
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Durable // High priority - resistant to eviction
 	}
 }
 
@@ -28,8 +28,8 @@ struct FreeUserId(u64);
 impl CacheKey for FreeUserId {
 	type Value = UserProfile;
 
-	fn weight(&self) -> u64 {
-		10 // Low weight - more likely to be evicted
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Volatile // Low priority - more likely to be evicted
 	}
 }
 
@@ -66,18 +66,18 @@ fn main() {
 		);
 	}
 
-	// Premium user should still be in cache (high weight)
+	// Premium user should still be in cache (high priority)
 	if cache.contains(&PremiumUserId(1)) {
-		println!("✓ Premium user (high weight) survived eviction");
+		println!("✓ Premium user (high priority) survived eviction");
 	} else {
 		println!("✗ Premium user was evicted (unexpected)");
 	}
 
-	// Original free user is likely evicted (low weight)
+	// Original free user is likely evicted (low priority)
 	if cache.contains(&FreeUserId(2)) {
 		println!("✓ Free user still in cache");
 	} else {
-		println!("✗ Free user was evicted (expected due to low weight)");
+		println!("✗ Free user was evicted (expected due to low priority)");
 	}
 
 	println!("\nCache stats:");

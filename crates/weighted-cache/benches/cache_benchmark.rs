@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use quick_cache::sync::Cache as QuickCache;
-use weighted_cache::{Cache, CacheKey, DeepSizeOf};
+use weighted_cache::{Cache, CacheKey, CachePolicy, DeepSizeOf};
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
 struct BenchKey(u64);
@@ -11,8 +11,8 @@ struct BenchKey(u64);
 impl CacheKey for BenchKey {
 	type Value = BenchValue;
 
-	fn weight(&self) -> u64 {
-		50
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Standard
 	}
 }
 

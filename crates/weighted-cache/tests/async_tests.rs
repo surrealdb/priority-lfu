@@ -10,8 +10,8 @@ struct AsyncKey(u64);
 impl CacheKey for AsyncKey {
 	type Value = AsyncValue;
 
-	fn weight(&self) -> u64 {
-		100
+	fn policy(&self) -> weighted_cache::CachePolicy {
+		weighted_cache::CachePolicy::Standard
 	}
 }
 

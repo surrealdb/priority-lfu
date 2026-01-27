@@ -7,8 +7,14 @@ struct TestKey(u64, u64); // (id, weight)
 impl CacheKey for TestKey {
 	type Value = TestValue;
 
-	fn weight(&self) -> u64 {
-		self.1
+	fn policy(&self) -> weighted_cache::CachePolicy {
+		// Map the u64 weight to a policy for property testing
+		match self.1 % 4 {
+			0 => weighted_cache::CachePolicy::Critical,
+			1 => weighted_cache::CachePolicy::Durable,
+			2 => weighted_cache::CachePolicy::Standard,
+			_ => weighted_cache::CachePolicy::Volatile,
+		}
 	}
 }
 
