@@ -1,9 +1,12 @@
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+#[cfg(feature = "metrics")]
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use parking_lot::RwLock;
 
 use crate::erased::{Entry, ErasedKey, ErasedKeyRef};
 use crate::guard::Guard;
+#[cfg(feature = "metrics")]
 use crate::metrics::CacheMetrics;
 use crate::shard::Shard;
 use crate::traits::CacheKey;
@@ -64,18 +67,25 @@ pub struct Cache {
 	/// Number of shards
 	shard_count: usize,
 	/// Maximum capacity in bytes
+	#[cfg_attr(not(feature = "metrics"), allow(dead_code))]
 	max_size_bytes: usize,
 	/// Metrics: cache hits
+	#[cfg(feature = "metrics")]
 	hits: AtomicU64,
 	/// Metrics: cache misses
+	#[cfg(feature = "metrics")]
 	misses: AtomicU64,
 	/// Metrics: new inserts
+	#[cfg(feature = "metrics")]
 	inserts: AtomicU64,
 	/// Metrics: updates (replaced existing key)
+	#[cfg(feature = "metrics")]
 	updates: AtomicU64,
 	/// Metrics: evictions
+	#[cfg(feature = "metrics")]
 	evictions: AtomicU64,
 	/// Metrics: explicit removals
+	#[cfg(feature = "metrics")]
 	removals: AtomicU64,
 }
 
@@ -107,11 +117,17 @@ impl Cache {
 			entry_count: AtomicUsize::new(0),
 			shard_count,
 			max_size_bytes,
+			#[cfg(feature = "metrics")]
 			hits: AtomicU64::new(0),
+			#[cfg(feature = "metrics")]
 			misses: AtomicU64::new(0),
+			#[cfg(feature = "metrics")]
 			inserts: AtomicU64::new(0),
+			#[cfg(feature = "metrics")]
 			updates: AtomicU64::new(0),
+			#[cfg(feature = "metrics")]
 			evictions: AtomicU64::new(0),
+			#[cfg(feature = "metrics")]
 			removals: AtomicU64::new(0),
 		}
 	}
@@ -150,12 +166,14 @@ impl Cache {
 				self.current_size.fetch_sub((-size_diff) as usize, Ordering::Relaxed);
 			}
 			// Metrics: track update
+			#[cfg(feature = "metrics")]
 			self.updates.fetch_add(1, Ordering::Relaxed);
 		} else {
 			// New entry
 			self.current_size.fetch_add(entry_size, Ordering::Relaxed);
 			self.entry_count.fetch_add(1, Ordering::Relaxed);
 			// Metrics: track insert
+			#[cfg(feature = "metrics")]
 			self.inserts.fetch_add(1, Ordering::Relaxed);
 		}
 
@@ -164,6 +182,7 @@ impl Cache {
 			self.entry_count.fetch_sub(num_evictions, Ordering::Relaxed);
 			self.current_size.fetch_sub(evicted_size, Ordering::Relaxed);
 			// Metrics: track evictions
+			#[cfg(feature = "metrics")]
 			self.evictions.fetch_add(num_evictions as u64, Ordering::Relaxed);
 		}
 
@@ -193,11 +212,13 @@ impl Cache {
 		// Look up entry (bumps reference counter internally, zero allocation)
 		let Some(entry) = shard.get_ref(&key_ref) else {
 			// Metrics: track miss
+			#[cfg(feature = "metrics")]
 			self.misses.fetch_add(1, Ordering::Relaxed);
 			return None;
 		};
 
 		// Metrics: track hit
+		#[cfg(feature = "metrics")]
 		self.hits.fetch_add(1, Ordering::Relaxed);
 
 		// Get pointer to value (use value_ref for type-safe downcast)
@@ -232,11 +253,13 @@ impl Cache {
 
 		let Some(entry) = shard.get_ref(&key_ref) else {
 			// Metrics: track miss
+			#[cfg(feature = "metrics")]
 			self.misses.fetch_add(1, Ordering::Relaxed);
 			return None;
 		};
 
 		// Metrics: track hit
+		#[cfg(feature = "metrics")]
 		self.hits.fetch_add(1, Ordering::Relaxed);
 
 		// Clone the value
@@ -265,6 +288,7 @@ impl Cache {
 		self.entry_count.fetch_sub(1, Ordering::Relaxed);
 
 		// Metrics: track removal
+		#[cfg(feature = "metrics")]
 		self.removals.fetch_add(1, Ordering::Relaxed);
 
 		entry.into_value::<K::Value>()
@@ -312,12 +336,15 @@ impl Cache {
 		self.entry_count.store(0, Ordering::Relaxed);
 
 		// Reset all metrics
-		self.hits.store(0, Ordering::Relaxed);
-		self.misses.store(0, Ordering::Relaxed);
-		self.inserts.store(0, Ordering::Relaxed);
-		self.updates.store(0, Ordering::Relaxed);
-		self.evictions.store(0, Ordering::Relaxed);
-		self.removals.store(0, Ordering::Relaxed);
+		#[cfg(feature = "metrics")]
+		{
+			self.hits.store(0, Ordering::Relaxed);
+			self.misses.store(0, Ordering::Relaxed);
+			self.inserts.store(0, Ordering::Relaxed);
+			self.updates.store(0, Ordering::Relaxed);
+			self.evictions.store(0, Ordering::Relaxed);
+			self.removals.store(0, Ordering::Relaxed);
+		}
 	}
 
 	/// Get performance metrics snapshot.
@@ -338,6 +365,7 @@ impl Cache {
 	/// println!("Cache utilization: {:.2}%", metrics.utilization() * 100.0);
 	/// println!("Total evictions: {}", metrics.evictions);
 	/// ```
+	#[cfg(feature = "metrics")]
 	pub fn metrics(&self) -> CacheMetrics {
 		CacheMetrics {
 			hits: self.hits.load(Ordering::Relaxed),

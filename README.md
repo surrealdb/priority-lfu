@@ -118,7 +118,16 @@ let cache = CacheBuilder::new(1024 * 1024 * 512) // 512 MB
 
 ## Metrics
 
-The cache provides comprehensive performance metrics for monitoring and debugging:
+The cache provides comprehensive performance metrics for monitoring and debugging.
+
+**Note:** Metrics tracking is behind the `metrics` feature flag and not enabled by default to minimize overhead. To use metrics, add the feature to your `Cargo.toml`:
+
+```toml
+[dependencies]
+weighted-cache = { version = "0.1", features = ["metrics"] }
+```
+
+Example usage:
 
 ```rust,ignore
 use weighted_cache::Cache;
@@ -204,6 +213,15 @@ async fn monitor_cache(cache: Arc<Cache>) {
     }
 }
 ```
+
+### Performance Impact
+
+Metrics tracking adds overhead through atomic operations on every cache access:
+- **6+ atomic operations per insert** (insert/update/eviction tracking)
+- **2 atomic operations per get** (hit/miss tracking)
+- Additional memory for storing 6 `AtomicU64` counters
+
+If you don't need metrics, omit the `metrics` feature for maximum performance. The default build (without metrics) eliminates all tracking overhead.
 
 ## How It Works
 

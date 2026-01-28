@@ -33,6 +33,25 @@ jobs:
       - name: Run clippy
         run: cargo clippy -- -D warnings
 
+  clippy-with-metrics:
+    name: Clippy (with metrics)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_STABLE }}
+          components: clippy
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run clippy with metrics
+        run: cargo clippy --features metrics -- -D warnings
+
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -50,6 +69,24 @@ jobs:
 
       - name: Run tests
         run: cargo test --all-features
+
+  test-with-metrics:
+    name: Test (with metrics)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_STABLE }}
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run tests with metrics
+        run: cargo test --features metrics
 
   fmt:
     name: Format

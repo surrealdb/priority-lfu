@@ -712,6 +712,7 @@ fn test_frequency_decays_during_sweep() {
 // Metrics Tests
 // ============================================================================
 
+#[cfg(feature = "metrics")]
 #[test]
 fn test_metrics_hit_miss_counters() {
 	let cache = Cache::new(1024);
@@ -741,6 +742,7 @@ fn test_metrics_hit_miss_counters() {
 	assert_eq!(metrics.total_accesses(), 4);
 }
 
+#[cfg(feature = "metrics")]
 #[test]
 fn test_metrics_insert_update_counters() {
 	let cache = Cache::new(1024);
@@ -765,6 +767,7 @@ fn test_metrics_insert_update_counters() {
 	assert_eq!(metrics.total_writes(), 5);
 }
 
+#[cfg(feature = "metrics")]
 #[test]
 fn test_metrics_eviction_counter() {
 	// Small cache that will trigger eviction
@@ -793,6 +796,7 @@ fn test_metrics_eviction_counter() {
 	);
 }
 
+#[cfg(feature = "metrics")]
 #[test]
 fn test_metrics_removal_counter() {
 	let cache = Cache::new(1024);
@@ -817,6 +821,7 @@ fn test_metrics_removal_counter() {
 	assert_eq!(metrics.removals, 2, "Removals should still be 2");
 }
 
+#[cfg(feature = "metrics")]
 #[test]
 fn test_metrics_size_and_utilization() {
 	let capacity = 1024usize;
@@ -837,6 +842,7 @@ fn test_metrics_size_and_utilization() {
 	assert!(metrics.utilization() <= 1.0, "Utilization should be <= 1.0");
 }
 
+#[cfg(feature = "metrics")]
 #[test]
 fn test_metrics_entry_count() {
 	let cache = Cache::new(1024);
@@ -860,6 +866,7 @@ fn test_metrics_entry_count() {
 	assert_eq!(metrics.entry_count, 8);
 }
 
+#[cfg(feature = "metrics")]
 #[test]
 fn test_metrics_clear_resets_counters() {
 	let cache = Cache::new(1024);
@@ -891,6 +898,7 @@ fn test_metrics_clear_resets_counters() {
 	assert_eq!(metrics.current_size_bytes, 0, "Size should be reset");
 }
 
+#[cfg(feature = "metrics")]
 #[test]
 fn test_metrics_computed_methods() {
 	let cache = Cache::new(1024);
@@ -922,6 +930,7 @@ fn test_metrics_computed_methods() {
 	assert_eq!(metrics.total_writes(), 3); // 2 inserts + 1 update
 }
 
+#[cfg(feature = "metrics")]
 #[test]
 fn test_metrics_with_get_method() {
 	let cache = Cache::new(1024);
@@ -946,6 +955,7 @@ fn test_metrics_with_get_method() {
 	assert_eq!(metrics.misses, 1);
 }
 
+#[cfg(feature = "metrics")]
 #[test]
 fn test_metrics_concurrent_updates() {
 	let cache = Arc::new(Cache::new(10240));

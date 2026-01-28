@@ -13,6 +13,7 @@ categories = ["caching"]
 
 [features]
 default = ["bytes", "chrono", "geo", "uuid", "regex", "rust_decimal"]
+metrics = []
 
 [dependencies]
 parking_lot.workspace = true

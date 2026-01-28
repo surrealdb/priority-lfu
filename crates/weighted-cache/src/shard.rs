@@ -30,7 +30,6 @@
 use std::hash::{BuildHasher, Hasher};
 use std::sync::atomic::Ordering;
 
-use ahash::RandomState;
 use hashbrown::HashMap;
 use hashbrown::hash_map::Entry as HashMapEntry;
 use indexmap::IndexMap;
@@ -71,7 +70,7 @@ impl BuildHasher for PassthroughBuildHasher {
 /// A single policy bucket containing entries with the same eviction priority.
 struct PolicyBucket {
 	/// Entries in this bucket (ordered for clock sweep)
-	list: IndexMap<ErasedKey, (), RandomState>,
+	list: IndexMap<ErasedKey, (), PassthroughBuildHasher>,
 	/// Clock hand position (index into list)
 	hand: usize,
 }
@@ -79,7 +78,7 @@ struct PolicyBucket {
 impl PolicyBucket {
 	fn new() -> Self {
 		Self {
-			list: IndexMap::with_hasher(RandomState::new()),
+			list: IndexMap::with_hasher(PassthroughBuildHasher),
 			hand: 0,
 		}
 	}
@@ -157,7 +156,7 @@ impl Shard {
 	/// * `size_capacity` - Total size capacity for this shard (in bytes)
 	pub fn new(size_capacity: usize) -> Self {
 		Self {
-			entries: HashMap::with_hasher(PassthroughBuildHasher),
+			entries: HashMap::with_hasher(PassthroughBuildHasher::default()),
 			buckets: [
 				PolicyBucket::new(), // Critical
 				PolicyBucket::new(), // Standard
