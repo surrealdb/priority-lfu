@@ -16,7 +16,7 @@ pub(crate) struct ErasedKey {
 	pub type_id: TypeId,
 	/// Pre-computed hash of (TypeId, K)
 	pub hash: u64,
-	/// The actual key, boxed and type-erased
+	/// The actual key, boxed and type-erased (Arc allows cheap cloning for policy buckets)
 	pub data: Arc<dyn Any + Send + Sync>,
 	/// Equality comparison function for handling hash collisions correctly
 	eq_fn: fn(&Arc<dyn Any + Send + Sync>, &Arc<dyn Any + Send + Sync>) -> bool,
@@ -27,7 +27,7 @@ impl ErasedKey {
 	pub fn new<K: CacheKey>(key: &K) -> Self {
 		let type_id = TypeId::of::<K>();
 		let hash = Self::compute_hash(type_id, key);
-		
+
 		// Create a monomorphized equality function for this key type.
 		// The compiler will generate one instance per concrete K type.
 		fn eq_impl<K: CacheKey>(
@@ -39,7 +39,7 @@ impl ErasedKey {
 				_ => false,
 			}
 		}
-		
+
 		Self {
 			type_id,
 			hash,
@@ -160,10 +160,11 @@ impl<'a, K: CacheKey> Hash for ErasedKeyRef<'a, K> {
 
 /// Type-erased cache entry with cached metadata.
 ///
-/// Stores the value as `Arc<dyn Any>` to enable cheap cloning for `get_arc()`.
+/// Stores the value as `Box<dyn Any>` for type erasure without forced Arc overhead.
+/// Users control ownership semantics via their `CacheKey::Value` type (e.g., `Arc<T>`).
 pub struct Entry {
-	/// Type-erased value wrapped in Arc for cheap sharing across threads.
-	pub value: Arc<dyn Any + Send + Sync>,
+	/// Type-erased value
+	pub value: Box<dyn Any + Send + Sync>,
 	/// Cached deep_size() result (immutable after creation)
 	pub size: usize,
 	/// Cached policy() result (immutable after creation)
@@ -183,20 +184,24 @@ impl Entry {
 		Self {
 			size,
 			policy,
-			value: Arc::new(value),
+			value: Box::new(value),
 			frequency: AtomicU8::new(0),
 			clock_bit: AtomicBool::new(false),
 		}
 	}
 
-	/// Clone the Arc without cloning the underlying value.
+	/// Get a reference to the value.
 	///
 	/// Returns None if the type doesn't match.
-	pub fn value_arc<V: Send + Sync + 'static>(&self) -> Option<Arc<V>> {
-		// Clone the Arc (cheap reference count bump)
-		let arc_any = Arc::clone(&self.value);
-		// Downcast to concrete type
-		Arc::downcast::<V>(arc_any).ok()
+	pub fn value_ref<V: Send + Sync + 'static>(&self) -> Option<&V> {
+		self.value.downcast_ref::<V>()
+	}
+
+	/// Consume the entry and extract the value.
+	///
+	/// Returns None if the type doesn't match.
+	pub fn into_value<V: Send + Sync + 'static>(self) -> Option<V> {
+		self.value.downcast::<V>().ok().map(|boxed| *boxed)
 	}
 }
 
@@ -254,7 +259,7 @@ mod tests {
 
 		// Same value keys should be equal
 		assert_eq!(erased1, erased2);
-		
+
 		// Different value keys should not be equal
 		assert_ne!(erased1, erased3);
 		assert_ne!(erased2, erased3);
@@ -286,17 +291,30 @@ mod tests {
 	}
 
 	#[test]
-	fn test_entry_value_arc() {
+	fn test_entry_value_ref() {
 		let value = TestValue {
 			data: vec![1, 2, 3, 4],
 		};
 		let entry = Entry::new(value, CachePolicy::Standard);
 
-		let arc = entry.value_arc::<TestValue>();
-		assert!(arc.is_some());
+		let value_ref = entry.value_ref::<TestValue>();
+		assert!(value_ref.is_some());
+		assert_eq!(value_ref.expect("value_ref should be Some").data, vec![1, 2, 3, 4]);
 
-		let arc = entry.value_arc::<String>();
-		assert!(arc.is_none());
+		let value_ref = entry.value_ref::<String>();
+		assert!(value_ref.is_none());
+	}
+
+	#[test]
+	fn test_entry_into_value() {
+		let value = TestValue {
+			data: vec![1, 2, 3, 4],
+		};
+		let entry = Entry::new(value, CachePolicy::Standard);
+
+		let extracted = entry.into_value::<TestValue>();
+		assert!(extracted.is_some());
+		assert_eq!(extracted.expect("extracted should be Some").data, vec![1, 2, 3, 4]);
 	}
 
 	#[test]

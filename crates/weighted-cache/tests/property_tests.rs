@@ -33,7 +33,7 @@ proptest! {
 		}
 
 		for key in &keys {
-			let result = cache.get_arc(&TestKey(*key, 50));
+			let result = cache.get_clone(&TestKey(*key, 50));
 			prop_assert!(result.is_some());
 		}
 	}
@@ -107,7 +107,7 @@ proptest! {
 		prop_assert!(cache.contains(&TestKey(key, weight)));
 
 		// Cache should have exactly 1 entry for this key
-		let result = cache.get_arc(&TestKey(key, weight));
+		let result = cache.get_clone(&TestKey(key, weight));
 		prop_assert!(result.is_some());
 	}
 
@@ -144,7 +144,7 @@ fn test_no_panics_on_empty_operations() {
 	let cache = Cache::new(1024);
 
 	// Operations on empty cache should not panic
-	assert!(cache.get_arc(&TestKey(1, 50)).is_none());
+	assert!(cache.get_clone(&TestKey(1, 50)).is_none());
 	assert!(cache.remove(&TestKey(1, 50)).is_none());
 	assert!(!cache.contains(&TestKey(1, 50)));
 	assert_eq!(cache.len(), 0);

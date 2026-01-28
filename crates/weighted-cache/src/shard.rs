@@ -21,8 +21,8 @@
 //! - **Passthrough hasher**: Since `ErasedKey` pre-computes its hash value, we use a passthrough
 //!   hasher that returns the stored hash directly, avoiding redundant hashing on lookups.
 //!
-//! - **IndexMap for clock**: Each policy bucket uses `IndexMap` to maintain insertion order
-//!   (for the clock hand) while providing O(1) key-based lookups and removals.
+//! - **IndexMap for clock**: Each policy bucket uses `IndexMap` to maintain insertion order (for
+//!   the clock hand) while providing O(1) key-based lookups and removals.
 //!
 //! - **Atomic metadata**: Clock bits and frequency counters use atomic types, allowing updates
 //!   during concurrent reads without requiring a write lock.
@@ -105,7 +105,8 @@ impl PolicyBucket {
 	/// When swap_remove is used, the last element is moved to fill the gap.
 	/// We must adjust the hand position accordingly:
 	/// - If we removed before the hand, decrement hand
-	/// - If we removed at the old last position and hand pointed there, it now points to removed slot
+	/// - If we removed at the old last position and hand pointed there, it now points to removed
+	///   slot
 	fn remove(&mut self, key: &ErasedKey) -> bool {
 		let old_len = self.list.len();
 		if let Some((removed_idx, _, _)) = self.list.swap_remove_full(key) {
@@ -175,11 +176,7 @@ impl Shard {
 		let policy = entry.policy;
 
 		// Check if key exists and get old metadata (uses raw_entry for single hash computation)
-		let old_info = self
-			.entries
-			.raw_entry()
-			.from_key(&key)
-			.map(|(_, e)| (e.policy, e.size));
+		let old_info = self.entries.raw_entry().from_key(&key).map(|(_, e)| (e.policy, e.size));
 
 		// If key exists, remove from old bucket and adjust size
 		if let Some((old_policy, old_size)) = old_info {
@@ -529,7 +526,7 @@ mod tests {
 	fn test_insert_oversized_entry_into_empty_shard() {
 		// Test inserting a single entry larger than the shard capacity
 		// This should succeed (allowing the cache to be useful for large items)
-		
+
 		#[derive(DeepSizeOf)]
 		struct LargeValue {
 			data: Vec<u8>,
@@ -555,14 +552,18 @@ mod tests {
 
 		// Size should exceed capacity (which is acceptable for a single oversized entry)
 		assert_eq!(shard.size_current, entry_size);
-		assert!(shard.size_current > shard.size_capacity, 
-			"Expected size {} > capacity {}", shard.size_current, shard.size_capacity);
+		assert!(
+			shard.size_current > shard.size_capacity,
+			"Expected size {} > capacity {}",
+			shard.size_current,
+			shard.size_capacity
+		);
 	}
 
 	#[test]
 	fn test_insert_oversized_entry_evicts_existing() {
 		// Test that inserting an oversized entry triggers evictions
-		
+
 		#[derive(DeepSizeOf)]
 		struct SmallValue {
 			data: Vec<u8>,
@@ -599,13 +600,16 @@ mod tests {
 
 		// Should have triggered evictions (may hit retry limit before evicting all)
 		assert!(num_evictions > 0, "Expected some evictions but got none");
-		
+
 		// The oversized entry should be inserted
 		assert!(shard.contains(&big_key), "Oversized entry should be inserted");
-		
+
 		// After inserting oversized entry, old entries should be gone
-		assert!(shard.len() < initial_len + 1, 
-			"Expected fewer than {} entries after eviction, but got {}", 
-			initial_len + 1, shard.len());
+		assert!(
+			shard.len() < initial_len + 1,
+			"Expected fewer than {} entries after eviction, but got {}",
+			initial_len + 1,
+			shard.len()
+		);
 	}
 }

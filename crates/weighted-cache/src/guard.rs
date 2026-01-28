@@ -8,7 +8,7 @@ use parking_lot::RwLockReadGuard;
 /// **Intentionally `!Send`** to prevent holding across `.await` points,
 /// which could cause deadlocks or excessive lock contention.
 ///
-/// For async contexts, use `Cache::get_arc()` instead.
+/// For async contexts, use `Cache::get_clone()` instead.
 ///
 /// # Example
 ///
@@ -19,6 +19,10 @@ use parking_lot::RwLockReadGuard;
 ///     guard.some_field.clone()
 /// };
 /// some_async_fn(data).await;
+///
+/// // ✅ Good: Use get_clone() for async contexts
+/// let value = cache.get_clone(&key)?;
+/// some_async_fn(&value).await;
 ///
 /// // ❌ Bad: Would hold lock across await (won't compile in Send context)
 /// let guard = cache.get(&key)?;

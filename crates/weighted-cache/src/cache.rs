@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use parking_lot::RwLock;
@@ -19,16 +18,16 @@ use crate::traits::CacheKey;
 /// This cache uses a two-level eviction strategy that combines policy-based prioritization
 /// with recency and frequency tracking:
 ///
-/// 1. **Policy-based stratification**: Each entry has an eviction policy (Critical, Standard,
-///    or Volatile). When space is needed, lower-priority entries are evicted first:
+/// 1. **Policy-based stratification**: Each entry has an eviction policy (Critical, Standard, or
+///    Volatile). When space is needed, lower-priority entries are evicted first:
 ///    - **Volatile** (lowest priority) - evicted first
-///    - **Standard** (normal priority) - evicted if Volatile is empty  
+///    - **Standard** (normal priority) - evicted if Volatile is empty
 ///    - **Critical** (highest priority) - evicted only as a last resort
 ///
 /// 2. **Clock algorithm**: Within each policy bucket, a "clock sweep" finds eviction candidates.
 ///    The algorithm uses two signals:
-///    - **Clock bit**: Set when an entry is accessed. During eviction, if set, the bit is
-///      cleared and the entry gets another chance. If clear, the entry is a candidate.
+///    - **Clock bit**: Set when an entry is accessed. During eviction, if set, the bit is cleared
+///      and the entry gets another chance. If clear, the entry is a candidate.
 ///    - **Frequency counter** (0-255): Tracks access frequency. Even with a clear clock bit,
 ///      high-frequency entries get additional chances via frequency decay.
 ///
@@ -49,8 +48,8 @@ use crate::traits::CacheKey;
 /// // Share across tasks
 /// let cache_clone = cache.clone();
 /// tokio::spawn(async move {
-///     // Use get_arc() in async contexts to avoid holding guards across await points
-///     if let Some(value) = cache_clone.get_arc(&key) {
+///     // Use get_clone() in async contexts to avoid holding guards across await points
+///     if let Some(value) = cache_clone.get_clone(&key) {
 ///         do_async_work(&value).await;
 ///     }
 /// });
@@ -127,7 +126,7 @@ impl Cache {
 	///
 	/// Worst case: O(n) where n is the number of entries per shard.
 	/// Eviction happens via clock hand advancement within the shard.
-	pub fn insert<K: CacheKey>(&self, key: K, value: K::Value) -> Option<Arc<K::Value>> {
+	pub fn insert<K: CacheKey>(&self, key: K, value: K::Value) -> Option<K::Value> {
 		let erased_key = ErasedKey::new(&key);
 		let policy = key.policy();
 		let entry = Entry::new(value, policy);
@@ -168,14 +167,14 @@ impl Cache {
 			self.evictions.fetch_add(num_evictions as u64, Ordering::Relaxed);
 		}
 
-		old_entry.and_then(|e| e.value_arc::<K::Value>())
+		old_entry.and_then(|e| e.into_value::<K::Value>())
 	}
 
 	/// Retrieve a value via guard. The guard holds a read lock on the shard.
 	///
 	/// # Warning
 	///
-	/// Do NOT hold this guard across `.await` points. Use `get_arc()` instead
+	/// Do NOT hold this guard across `.await` points. Use `get_clone()` instead
 	/// for async contexts.
 	///
 	/// # Runtime Complexity
@@ -201,60 +200,47 @@ impl Cache {
 		// Metrics: track hit
 		self.hits.fetch_add(1, Ordering::Relaxed);
 
-		// Get pointer to value
-		let value_ptr = entry.value.as_ref() as *const _ as *const K::Value;
+		// Get pointer to value (use value_ref for type-safe downcast)
+		let value_ref = entry.value_ref::<K::Value>()?;
+		let value_ptr = value_ref as *const K::Value;
 
 		// SAFETY: We hold a read lock on the shard, so the entry won't be modified
 		// or dropped while the guard exists. The guard ties its lifetime to the lock.
 		unsafe { Some(Guard::new(shard, value_ptr)) }
 	}
 
-	/// Retrieve a value as `Arc<V>`. Safe to hold across `.await` points.
-	///
-	/// This is the preferred method for async code.
-	///
-	/// # Runtime Complexity
-	///
-	/// Expected case: O(1)
-	///
-	/// This method performs a zero-allocation hash table lookup, clones an `Arc`
-	/// pointer (not the underlying value), and atomically increments the reference counter.
-	pub fn get_arc<K: CacheKey>(&self, key: &K) -> Option<Arc<K::Value>> {
-		let key_ref = ErasedKeyRef::new(key); // Zero allocation
-		let shard_lock = self.get_shard(key_ref.hash);
-
-		// Short-lived read lock
-		let shard = shard_lock.read();
-		let entry = shard.get_ref(&key_ref); // Zero-allocation lookup
-
-		if let Some(entry) = entry {
-			// Metrics: track hit
-			self.hits.fetch_add(1, Ordering::Relaxed);
-			let arc = entry.value_arc::<K::Value>()?;
-			Some(arc)
-		} else {
-			// Metrics: track miss
-			self.misses.fetch_add(1, Ordering::Relaxed);
-			None
-		}
-	}
-
 	/// Retrieve a cloned value. Safe to hold across `.await` points.
 	///
-	/// Requires `V: Clone`. Use `get_arc()` if clone is expensive.
+	/// Requires `V: Clone`. This is the preferred method for async code.
 	///
 	/// # Runtime Complexity
 	///
 	/// Expected case: O(1) + O(m) where m is the cost of cloning the value.
 	///
 	/// This method performs a hash table lookup in O(1) expected time, then clones
-	/// the underlying value. If cloning is expensive, prefer `get_arc()` which only
-	/// clones the `Arc` pointer in O(1) time.
+	/// the underlying value. If cloning is expensive, consider using `Arc<T>` as your
+	/// value type, which makes cloning O(1).
 	pub fn get_clone<K: CacheKey>(&self, key: &K) -> Option<K::Value>
 	where
 		K::Value: Clone,
 	{
-		self.get_arc(key).map(|arc| (*arc).clone())
+		let key_ref = ErasedKeyRef::new(key); // Zero allocation
+		let shard_lock = self.get_shard(key_ref.hash);
+
+		// Short-lived read lock
+		let shard = shard_lock.read();
+
+		let Some(entry) = shard.get_ref(&key_ref) else {
+			// Metrics: track miss
+			self.misses.fetch_add(1, Ordering::Relaxed);
+			return None;
+		};
+
+		// Metrics: track hit
+		self.hits.fetch_add(1, Ordering::Relaxed);
+
+		// Clone the value
+		entry.value_ref::<K::Value>().cloned()
 	}
 
 	/// Remove a key from the cache.
@@ -268,7 +254,7 @@ impl Cache {
 	/// The worst case occurs when the entry is removed from an IndexMap segment,
 	/// which preserves insertion order and may require shifting elements. In practice,
 	/// most removals are O(1) amortized.
-	pub fn remove<K: CacheKey>(&self, key: &K) -> Option<Arc<K::Value>> {
+	pub fn remove<K: CacheKey>(&self, key: &K) -> Option<K::Value> {
 		let erased_key = ErasedKey::new(key);
 		let shard_lock = self.get_shard(erased_key.hash);
 
@@ -281,7 +267,7 @@ impl Cache {
 		// Metrics: track removal
 		self.removals.fetch_add(1, Ordering::Relaxed);
 
-		entry.value_arc::<K::Value>()
+		entry.into_value::<K::Value>()
 	}
 
 	/// Check if a key exists (zero allocation).
@@ -405,8 +391,8 @@ mod tests {
 
 		cache.insert(key.clone(), value.clone());
 
-		let retrieved = cache.get_arc(&key).expect("key should exist");
-		assert_eq!(*retrieved, value);
+		let retrieved = cache.get_clone(&key).expect("key should exist");
+		assert_eq!(retrieved, value);
 	}
 
 	#[test]
@@ -422,7 +408,7 @@ mod tests {
 		assert!(cache.contains(&key));
 
 		let removed = cache.remove(&key).expect("key should exist");
-		assert_eq!(*removed, value);
+		assert_eq!(removed, value);
 		assert!(!cache.contains(&key));
 	}
 
@@ -463,8 +449,8 @@ mod tests {
 					};
 					cache.insert(key.clone(), value.clone());
 
-					if let Some(retrieved) = cache.get_arc(&key) {
-						assert_eq!(*retrieved, value);
+					if let Some(retrieved) = cache.get_clone(&key) {
+						assert_eq!(retrieved, value);
 					}
 				}
 			}));

@@ -86,17 +86,13 @@ fn test_basic_operations() {
 		assert_eq!(*guard, value);
 	}
 
-	// Get with Arc
-	let arc = cache.get_arc(&key).expect("key should exist");
-	assert_eq!(*arc, value);
-
 	// Get clone
 	let cloned = cache.get_clone(&key).expect("key should exist");
 	assert_eq!(cloned, value);
 
 	// Remove
 	let removed = cache.remove(&key).expect("key should exist");
-	assert_eq!(*removed, value);
+	assert_eq!(removed, value);
 	assert!(!cache.contains(&key));
 }
 
@@ -117,11 +113,11 @@ fn test_heterogeneous_types() {
 
 	assert_eq!(cache.len(), 2);
 
-	let str_retrieved = cache.get_arc(&str_key).expect("str_key should exist");
-	assert_eq!(*str_retrieved, str_val);
+	let str_retrieved = cache.get_clone(&str_key).expect("str_key should exist");
+	assert_eq!(str_retrieved, str_val);
 
-	let int_retrieved = cache.get_arc(&int_key).expect("int_key should exist");
-	assert_eq!(*int_retrieved, int_val);
+	let int_retrieved = cache.get_clone(&int_key).expect("int_key should exist");
+	assert_eq!(int_retrieved, int_val);
 }
 
 #[test]
@@ -137,10 +133,10 @@ fn test_update_existing() {
 
 	let old = cache.insert(key.clone(), value2.clone());
 	assert!(old.is_some());
-	assert_eq!(*old.expect("old value should exist"), value1);
+	assert_eq!(old.expect("old value should exist"), value1);
 
-	let current = cache.get_arc(&key).expect("key should exist");
-	assert_eq!(*current, value2);
+	let current = cache.get_clone(&key).expect("key should exist");
+	assert_eq!(current, value2);
 }
 
 #[test]
@@ -174,8 +170,8 @@ fn test_frequency_based_eviction() {
 
 	// Access some Critical entries heavily
 	for _ in 0..20 {
-		let _ = cache.get_arc(&CriticalKey(1));
-		let _ = cache.get_arc(&CriticalKey(2));
+		let _ = cache.get_clone(&CriticalKey(1));
+		let _ = cache.get_clone(&CriticalKey(2));
 	}
 
 	// Don't access CriticalKey(3), (4), (5)
@@ -212,7 +208,7 @@ fn test_concurrent_reads() {
 		handles.push(thread::spawn(move || {
 			for i in 0..100 {
 				let key = IntKey(i);
-				if let Some(value) = cache.get_arc(&key) {
+				if let Some(value) = cache.get_clone(&key) {
 					assert_eq!(value.0, i as i64);
 				}
 			}
@@ -264,7 +260,7 @@ fn test_concurrent_mixed_operations() {
 		handles.push(thread::spawn(move || {
 			for i in 0..100 {
 				let key = IntKey(i % 50);
-				let _ = cache.get_arc(&key);
+				let _ = cache.get_clone(&key);
 			}
 		}));
 	}
@@ -324,7 +320,7 @@ fn test_large_values() {
 
 	cache.insert(key.clone(), value);
 
-	let retrieved = cache.get_arc(&key).expect("key should exist");
+	let retrieved = cache.get_clone(&key).expect("key should exist");
 	assert_eq!(retrieved.data.len(), 100_000);
 }
 
@@ -421,7 +417,7 @@ fn test_same_policy_frequency_tiebreaker() {
 	// Access some entries to build up usage patterns
 	for _ in 0..10 {
 		for i in 1..=5 {
-			let _ = cache.get_arc(&StandardKey(i));
+			let _ = cache.get_clone(&StandardKey(i));
 		}
 	}
 
@@ -455,7 +451,7 @@ fn test_large_volatile_vs_small_critical() {
 	// Access Critical entries to increase their retention
 	for _ in 0..10 {
 		for i in 20..=30 {
-			let _ = cache.get_arc(&CriticalKey(i));
+			let _ = cache.get_clone(&CriticalKey(i));
 		}
 	}
 
@@ -484,7 +480,7 @@ fn test_access_pattern_survival() {
 	// Access some entries
 	for _ in 0..10 {
 		for i in 1..=10 {
-			let _ = cache.get_arc(&StandardKey(i));
+			let _ = cache.get_clone(&StandardKey(i));
 		}
 	}
 
@@ -515,7 +511,7 @@ fn test_all_critical_still_evicts() {
 	// Access some entries
 	for _ in 0..10 {
 		for i in 1..=5 {
-			let _ = cache.get_arc(&CriticalKey(i));
+			let _ = cache.get_clone(&CriticalKey(i));
 		}
 	}
 
@@ -551,7 +547,7 @@ fn test_policy_change_on_reinsert() {
 	}
 
 	// Verify updates worked
-	if let Some(val) = cache.get_arc(&StandardKey(1)) {
+	if let Some(val) = cache.get_clone(&StandardKey(1)) {
 		// Value should be updated
 		assert!(val.0 == 10 || val.0 == 1);
 	}
@@ -586,7 +582,7 @@ fn test_concurrent_access_affects_eviction() {
 			for _ in 0..20 {
 				for i in (1 + t * 5)..=(5 + t * 5) {
 					if i <= 20 {
-						let _ = cache.get_arc(&StandardKey(i));
+						let _ = cache.get_clone(&StandardKey(i));
 					}
 				}
 			}
@@ -626,7 +622,7 @@ fn test_exhausted_bucket_moves_to_next() {
 	// Access some Volatile entries
 	for _ in 0..10 {
 		for i in 1..=5 {
-			let _ = cache.get_arc(&VolatileKey(i));
+			let _ = cache.get_clone(&VolatileKey(i));
 		}
 	}
 
@@ -661,7 +657,7 @@ fn test_clock_bit_clearing() {
 
 	// Access entries to set clock_bit
 	for i in 1..=5 {
-		let _ = cache.get_arc(&StandardKey(i));
+		let _ = cache.get_clone(&StandardKey(i));
 	}
 
 	// First eviction pass should clear clock_bit but not evict
@@ -694,7 +690,7 @@ fn test_frequency_decays_during_sweep() {
 	// Access some entries to create usage patterns
 	for _ in 0..15 {
 		for i in 1..=10 {
-			let _ = cache.get_arc(&StandardKey(i));
+			let _ = cache.get_clone(&StandardKey(i));
 		}
 	}
 
@@ -731,12 +727,12 @@ fn test_metrics_hit_miss_counters() {
 	cache.insert(IntKey(2), IntValue(200));
 
 	// Hit on existing key
-	assert!(cache.get_arc(&IntKey(1)).is_some());
-	assert!(cache.get_arc(&IntKey(2)).is_some());
+	assert!(cache.get_clone(&IntKey(1)).is_some());
+	assert!(cache.get_clone(&IntKey(2)).is_some());
 
 	// Miss on non-existent key
-	assert!(cache.get_arc(&IntKey(3)).is_none());
-	assert!(cache.get_arc(&IntKey(4)).is_none());
+	assert!(cache.get_clone(&IntKey(3)).is_none());
+	assert!(cache.get_clone(&IntKey(4)).is_none());
 
 	let metrics = cache.metrics();
 	assert_eq!(metrics.hits, 2, "Should have 2 hits");
@@ -871,8 +867,8 @@ fn test_metrics_clear_resets_counters() {
 	// Generate some metrics
 	cache.insert(IntKey(1), IntValue(100));
 	cache.insert(IntKey(2), IntValue(200));
-	cache.get_arc(&IntKey(1));
-	cache.get_arc(&IntKey(3)); // miss
+	cache.get_clone(&IntKey(1));
+	cache.get_clone(&IntKey(3)); // miss
 	cache.remove(&IntKey(2));
 
 	let metrics = cache.metrics();
@@ -905,10 +901,10 @@ fn test_metrics_computed_methods() {
 
 	// Create some hits and misses
 	cache.insert(IntKey(1), IntValue(100));
-	cache.get_arc(&IntKey(1)); // hit
-	cache.get_arc(&IntKey(1)); // hit
-	cache.get_arc(&IntKey(1)); // hit
-	cache.get_arc(&IntKey(2)); // miss
+	cache.get_clone(&IntKey(1)); // hit
+	cache.get_clone(&IntKey(1)); // hit
+	cache.get_clone(&IntKey(1)); // hit
+	cache.get_clone(&IntKey(2)); // miss
 
 	let metrics = cache.metrics();
 	assert_eq!(metrics.hit_rate(), 0.75); // 3 hits out of 4 accesses
@@ -962,13 +958,13 @@ fn test_metrics_concurrent_updates() {
 			for i in 0..100 {
 				let key = IntKey(t * 100 + i);
 				cache.insert(key.clone(), IntValue(i as i64));
-				cache.get_arc(&key);
+				cache.get_clone(&key);
 			}
 		}));
 	}
 
 	for handle in handles {
-		handle.join().unwrap();
+		handle.join().expect("thread should not panic");
 	}
 
 	let metrics = cache.metrics();

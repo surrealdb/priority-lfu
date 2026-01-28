@@ -60,13 +60,13 @@ fn bench_get_hit(c: &mut Criterion) {
 		b.iter(|| {
 			for i in 0..1000 {
 				let key = BenchKey(black_box(i));
-				black_box(cache.get_arc(&key));
+				black_box(cache.get_clone(&key));
 			}
 		});
 	});
 }
 
-fn bench_get_arc_vs_get_clone(c: &mut Criterion) {
+fn bench_get_vs_get_clone(c: &mut Criterion) {
 	let cache = Arc::new(Cache::new(1024 * 1024));
 
 	// Pre-populate
@@ -81,10 +81,10 @@ fn bench_get_arc_vs_get_clone(c: &mut Criterion) {
 
 	let mut group = c.benchmark_group("get_methods");
 
-	group.bench_function("get_arc", |b| {
+	group.bench_function("get", |b| {
 		b.iter(|| {
 			for i in 0..100 {
-				black_box(cache.get_arc(&BenchKey(black_box(i))));
+				black_box(cache.get(&BenchKey(black_box(i))));
 			}
 		});
 	});
@@ -126,7 +126,7 @@ fn bench_mixed_workload(c: &mut Criterion) {
 					);
 				} else {
 					// 80% reads
-					black_box(cache.get_arc(&BenchKey(black_box(i % 500))));
+					black_box(cache.get_clone(&BenchKey(black_box(i % 500))));
 				}
 			}
 		});
@@ -156,7 +156,7 @@ fn bench_concurrent_reads(c: &mut Criterion) {
 				let cache = cache.clone();
 				handles.push(thread::spawn(move || {
 					for i in 0..250 {
-						black_box(cache.get_arc(&BenchKey(black_box(i))));
+						black_box(cache.get_clone(&BenchKey(black_box(i))));
 					}
 				}));
 			}
@@ -201,7 +201,7 @@ fn bench_hit_rate_zipf(c: &mut Criterion) {
 		b.iter(|| {
 			for &key_id in &zipf_keys {
 				let key = BenchKey(black_box(key_id));
-				match cache.get_arc(&key) {
+				match cache.get_clone(&key) {
 					Some(val) => {
 						black_box(val);
 					}
@@ -534,7 +534,7 @@ criterion_group!(
 	benches,
 	bench_insert,
 	bench_get_hit,
-	bench_get_arc_vs_get_clone,
+	bench_get_vs_get_clone,
 	bench_mixed_workload,
 	bench_concurrent_reads,
 	bench_eviction_pressure,

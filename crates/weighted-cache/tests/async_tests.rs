@@ -20,7 +20,7 @@ struct AsyncValue {
 }
 
 #[tokio::test]
-async fn test_get_arc_in_async() {
+async fn test_get_clone_in_async() {
 	let cache = Arc::new(Cache::new(10240));
 
 	let key = AsyncKey(1);
@@ -30,17 +30,17 @@ async fn test_get_arc_in_async() {
 
 	cache.insert(key.clone(), value.clone());
 
-	// ✅ Correct: Use get_arc() and hold Arc across await
-	if let Some(arc_value) = cache.get_arc(&key) {
+	// ✅ Correct: Use get_clone() and hold value across await
+	if let Some(cloned_value) = cache.get_clone(&key) {
 		// Simulate async work
 		tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
 
-		assert_eq!(*arc_value, value);
+		assert_eq!(cloned_value, value);
 	}
 }
 
 #[tokio::test]
-async fn test_get_clone_in_async() {
+async fn test_get_clone_with_arc_value() {
 	let cache = Arc::new(Cache::new(10240));
 
 	let key = AsyncKey(2);
@@ -50,7 +50,7 @@ async fn test_get_clone_in_async() {
 
 	cache.insert(key.clone(), value.clone());
 
-	// ✅ Correct: Clone the value before await
+	// ✅ Correct: Clone the value before await (cheap if using Arc<T> as value type)
 	if let Some(cloned_value) = cache.get_clone(&key) {
 		tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
 
@@ -102,7 +102,7 @@ async fn test_concurrent_async_tasks() {
 			for i in 0..100 {
 				let key = AsyncKey((task_id * 100 + i) % 100);
 
-				if let Some(value) = cache.get_arc(&key) {
+				if let Some(value) = cache.get_clone(&key) {
 					tokio::time::sleep(tokio::time::Duration::from_micros(1)).await;
 					assert!(!value.data.is_empty());
 				}
@@ -133,8 +133,8 @@ async fn test_async_insert_and_get() {
 				// Verify it was inserted
 				tokio::time::sleep(tokio::time::Duration::from_micros(10)).await;
 
-				if let Some(retrieved) = cache.get_arc(&key) {
-					assert_eq!(*retrieved, value);
+				if let Some(retrieved) = cache.get_clone(&key) {
+					assert_eq!(retrieved, value);
 				}
 			})
 		})

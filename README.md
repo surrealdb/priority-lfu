@@ -68,7 +68,7 @@ fn main() {
     });
 
     // Retrieve values
-    if let Some(user) = cache.get_arc(&UserId(1)) {
+    if let Some(user) = cache.get_clone(&UserId(1)) {
         println!("User: {}, Score: {}", user.name, user.score);
     }
 }
@@ -78,12 +78,10 @@ fn main() {
 
 The cache is safe to use in async contexts:
 
-```rust
-use std::sync::Arc;
-
+```rust,ignore
 async fn process_user(cache: Arc<Cache>, user_id: UserId) {
-    // ✅ Use get_arc() - returns Arc, releases lock immediately
-    if let Some(user) = cache.get_arc(&user_id) {
+    // ✅ Use get_clone() - releases lock immediately
+    if let Some(user) = cache.get_clone(&user_id) {
         // Safe to hold Arc across await points
         expensive_async_operation(&user).await;
     }
@@ -92,7 +90,8 @@ async fn process_user(cache: Arc<Cache>, user_id: UserId) {
 
 **⚠️ Warning**: Don't hold `Guard` across `.await` points:
 
-```rust
+```rust,ignore
+# let cache = weighted_cache::Cache::new(1024 * 1024);
 // ❌ BAD: Guard holds a lock
 let guard = cache.get(&key).unwrap();
 some_async_fn().await; // Will fail to compile in Send context
@@ -109,7 +108,7 @@ some_async_fn().await;
 
 Use `CacheBuilder` for custom settings:
 
-```rust
+```rust,ignore
 use weighted_cache::CacheBuilder;
 
 let cache = CacheBuilder::new(1024 * 1024 * 512) // 512 MB
@@ -121,7 +120,7 @@ let cache = CacheBuilder::new(1024 * 1024 * 512) // 512 MB
 
 The cache provides comprehensive performance metrics for monitoring and debugging:
 
-```rust
+```rust,ignore
 use weighted_cache::Cache;
 
 let cache = Cache::new(1024 * 1024);
@@ -129,8 +128,8 @@ let cache = Cache::new(1024 * 1024);
 // Perform some operations
 cache.insert(key1, value1);
 cache.insert(key2, value2);
-cache.get_arc(&key1);  // hit
-cache.get_arc(&key3);  // miss
+cache.get_clone(&key1);  // hit
+cache.get_clone(&key3);  // miss
 
 // Get metrics snapshot
 let metrics = cache.metrics();
@@ -182,7 +181,7 @@ The `CacheMetrics` struct provides helper methods for computed metrics:
 
 Example of integrating with a monitoring system:
 
-```rust
+```rust,ignore
 use std::time::Duration;
 use std::sync::Arc;
 
@@ -233,7 +232,7 @@ Each access sets the clock_bit and increments frequency (saturating at 255).
 
 This design provides **predictable priority-based eviction**:
 
-```rust
+```rust,ignore
 // Eviction order: Volatile → Standard → Durable → Critical
 // Within each bucket: Clock sweep with LFU tie-breaking
 
@@ -250,7 +249,7 @@ Benefits:
 
 ### Architecture
 
-```
+```ignore
 ┌───────────────────────────────────────┐
 │           Cache (Send + Sync)         │
 │  ┌─────────────────────────────────┐  │
@@ -281,16 +280,16 @@ Each shard contains:
 
 The cache is `Send + Sync` and can be shared via `Arc`:
 
-```rust
+```rust,ignore
 use std::sync::Arc;
-use std::thread;
+use weighted_cache::Cache;
 
 let cache = Arc::new(Cache::new(1024 * 1024));
 
 let handles: Vec<_> = (0..4)
     .map(|_| {
         let cache = cache.clone();
-        thread::spawn(move || {
+        std::thread::spawn(move || {
             // Safe concurrent access
             cache.insert(key, value);
         })
