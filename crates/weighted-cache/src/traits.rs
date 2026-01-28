@@ -1,36 +1,29 @@
 use std::hash::Hash;
 
+use weighted_cache_derive::DeepSizeOf;
+
 use crate::deepsize::DeepSizeOf;
+
+pub(crate) const NUM_POLICY_BUCKETS: usize = 3;
 
 /// Cache eviction policy determining retention priority.
 ///
 /// Lower discriminant values = higher priority = evicted last.
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, DeepSizeOf)]
 pub enum CachePolicy {
 	/// Critical metadata that should persist (catalog, schemas, indexes).
 	/// Last to be evicted, highest retention.
 	Critical = 0,
 
-	/// Important data with high reuse (active transaction records, hot tables).
-	/// Strong retention, evicted reluctantly.
-	Durable = 1,
-
 	/// Standard cacheable data (recent queries, lookup results).
 	/// Normal eviction behavior.
 	#[default]
-	Standard = 2,
+	Standard = 1,
 
 	/// Temporary or easily recomputed data (intermediate results, aggregations).
 	/// First to be evicted.
-	Volatile = 3,
-}
-
-// Implement DeepSizeOf for CachePolicy (zero-sized, stored inline)
-impl DeepSizeOf for CachePolicy {
-	fn deep_size_of_children(&self, _context: &mut crate::deepsize::Context) -> usize {
-		0 // Enum is Copy and has no heap allocations
-	}
+	Volatile = 2,
 }
 
 /// Marker trait for cache keys. Associates a key type with its value type.

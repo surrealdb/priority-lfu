@@ -50,7 +50,7 @@ impl CacheKey for UserId {
         
         // Example: VIP users get higher priority based on ID
         if self.0 < 1000 { 
-            CachePolicy::Durable 
+            CachePolicy::Critical 
         } else { 
             CachePolicy::Standard 
         }
@@ -124,9 +124,8 @@ let cache = CacheBuilder::new(1024 * 1024 * 512) // 512 MB
 The cache uses a **weight-stratified clock** eviction policy that maintains four priority buckets per shard:
 
 1. **Critical Bucket** (CachePolicy::Critical): Metadata, schemas, indexes - last to evict
-2. **Durable Bucket** (CachePolicy::Durable): Active records, hot tables - strong retention
-3. **Standard Bucket** (CachePolicy::Standard): Normal cacheable data - default priority
-4. **Volatile Bucket** (CachePolicy::Volatile): Temp data, intermediate results - first to evict
+2. **Standard Bucket** (CachePolicy::Standard): Normal cacheable data - default priority
+3. **Volatile Bucket** (CachePolicy::Volatile): Temp data, intermediate results - first to evict
 
 #### Eviction Process
 
@@ -151,7 +150,6 @@ This design provides **predictable priority-based eviction**:
 
 CachePolicy::Volatile   // Evicted first
 CachePolicy::Standard   // Normal eviction
-CachePolicy::Durable    // Strong retention
 CachePolicy::Critical   // Evicted last
 ```
 

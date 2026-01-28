@@ -9,10 +9,9 @@ impl CacheKey for TestKey {
 
 	fn policy(&self) -> weighted_cache::CachePolicy {
 		// Map the u64 weight to a policy for property testing
-		match self.1 % 4 {
+		match self.1 % 3 {
 			0 => weighted_cache::CachePolicy::Critical,
-			1 => weighted_cache::CachePolicy::Durable,
-			2 => weighted_cache::CachePolicy::Standard,
+			1 => weighted_cache::CachePolicy::Standard,
 			_ => weighted_cache::CachePolicy::Volatile,
 		}
 	}

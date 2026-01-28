@@ -6,6 +6,7 @@ use hashbrown::HashMap;
 use indexmap::IndexMap;
 
 use crate::erased::{Entry, ErasedKey, ErasedKeyRef};
+use crate::traits::NUM_POLICY_BUCKETS;
 
 /// Passthrough hasher for ErasedKey (which already has pre-computed hash).
 #[derive(Default)]
@@ -91,7 +92,7 @@ pub struct Shard {
 	/// Main entry storage (uses passthrough hasher since keys have pre-computed ahash)
 	pub(crate) entries: HashMap<ErasedKey, Entry, PassthroughBuildHasher>,
 	/// Policy buckets (one per CachePolicy variant)
-	buckets: [PolicyBucket; 4],
+	buckets: [PolicyBucket; 3],
 	/// Current total size in bytes
 	size_current: usize,
 	/// Maximum size in bytes
@@ -108,7 +109,6 @@ impl Shard {
 			entries: HashMap::with_hasher(PassthroughBuildHasher),
 			buckets: [
 				PolicyBucket::new(), // Critical
-				PolicyBucket::new(), // Durable
 				PolicyBucket::new(), // Standard
 				PolicyBucket::new(), // Volatile
 			],
@@ -227,7 +227,7 @@ impl Shard {
 	/// Returns the size of the evicted entry, or None if no eviction was possible.
 	fn evict_one(&mut self) -> Option<usize> {
 		// Try buckets from lowest priority (Volatile) to highest (Critical)
-		for policy_idx in (0..4).rev() {
+		for policy_idx in (0..NUM_POLICY_BUCKETS).rev() {
 			if let Some(evicted_size) = self.evict_from_bucket(policy_idx) {
 				return Some(evicted_size);
 			}
@@ -405,8 +405,8 @@ mod tests {
 		let standard_entry = make_entry(50, CachePolicy::Standard);
 		shard.insert(standard_key, standard_entry);
 
-		let durable_key = make_key(3, CachePolicy::Durable);
-		let durable_entry = make_entry(50, CachePolicy::Durable);
+		let durable_key = make_key(3, CachePolicy::Critical);
+		let durable_entry = make_entry(50, CachePolicy::Critical);
 		shard.insert(durable_key, durable_entry);
 
 		// Fill to trigger eviction - volatile should be evicted first

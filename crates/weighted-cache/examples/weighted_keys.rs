@@ -17,7 +17,7 @@ impl CacheKey for PremiumUserId {
 	type Value = UserProfile;
 
 	fn policy(&self) -> CachePolicy {
-		CachePolicy::Durable // High priority - resistant to eviction
+		CachePolicy::Critical // High priority - resistant to eviction
 	}
 }
 
