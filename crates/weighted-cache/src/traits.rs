@@ -55,11 +55,6 @@ pub trait CacheKey: Hash + Eq + Clone + Send + Sync + 'static {
 
 	/// Eviction policy determining retention priority.
 	///
-	/// This is *not* the memory size—it's a logical priority.
-	/// When the cache is full, items are evicted in order from Volatile to Critical.
-	/// Within each policy tier, a clock algorithm with frequency counting determines
-	/// which specific entries are evicted.
-	///
 	/// This method is called on the key, allowing different keys to have
 	/// different policies for the same value type.
 	fn policy(&self) -> CachePolicy {

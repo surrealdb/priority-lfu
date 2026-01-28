@@ -9,9 +9,37 @@ use crate::metrics::CacheMetrics;
 use crate::shard::Shard;
 use crate::traits::CacheKey;
 
-/// Thread-safe cache. Can be shared across threads via `Arc<Cache>`.
+/// Thread-safe cache with weight-stratified clock eviction.
 ///
-/// All methods are synchronous but safe to call from async contexts.
+/// The cache can be shared across threads via `Arc<Cache>`. All methods are synchronous
+/// but safe to call from async contexts.
+///
+/// # Weight-Stratified Clock Eviction
+///
+/// This cache uses a two-level eviction strategy that combines policy-based prioritization
+/// with recency and frequency tracking:
+///
+/// 1. **Policy-based stratification**: Each entry has an eviction policy (Critical, Standard,
+///    or Volatile). When space is needed, lower-priority entries are evicted first:
+///    - **Volatile** (lowest priority) - evicted first
+///    - **Standard** (normal priority) - evicted if Volatile is empty  
+///    - **Critical** (highest priority) - evicted only as a last resort
+///
+/// 2. **Clock algorithm**: Within each policy bucket, a "clock sweep" finds eviction candidates.
+///    The algorithm uses two signals:
+///    - **Clock bit**: Set when an entry is accessed. During eviction, if set, the bit is
+///      cleared and the entry gets another chance. If clear, the entry is a candidate.
+///    - **Frequency counter** (0-255): Tracks access frequency. Even with a clear clock bit,
+///      high-frequency entries get additional chances via frequency decay.
+///
+/// This approach ensures that frequently-accessed entries resist eviction regardless of policy,
+/// while still respecting policy-based priorities during memory pressure.
+///
+/// # Sharding for Concurrency
+///
+/// The cache divides its capacity across multiple shards (default: 64). Each shard has its
+/// own lock, reducing contention in concurrent workloads. Keys are distributed to shards
+/// via their hash value.
 ///
 /// # Async Usage
 ///

@@ -1,8 +1,38 @@
+//! Shard implementation for partitioned cache storage.
+//!
+//! A `Shard` is a single partition that stores cache entries and performs clock-based eviction
+//! within policy buckets. The `Cache` divides its capacity across multiple shards, each wrapped
+//! in an `RwLock` to reduce lock contention during concurrent access.
+//!
+//! # Clock Sweep Implementation
+//!
+//! Each shard maintains three policy buckets (Critical, Standard, Volatile). When eviction is
+//! needed, the shard sweeps through buckets in priority order (Volatile → Standard → Critical).
+//!
+//! Within each bucket, entries are arranged in a circular list with a "clock hand" that sweeps
+//! through them:
+//! - If an entry's clock bit is set, clear it and move to the next entry
+//! - If the clock bit is clear but frequency > 0, decrement frequency and move to next entry
+//! - If both clock bit and frequency are 0, evict the entry immediately
+//! - After a full sweep with no evictions, force-evict the entry at the hand position
+//!
+//! # Optimizations
+//!
+//! - **Passthrough hasher**: Since `ErasedKey` pre-computes its hash value, we use a passthrough
+//!   hasher that returns the stored hash directly, avoiding redundant hashing on lookups.
+//!
+//! - **IndexMap for clock**: Each policy bucket uses `IndexMap` to maintain insertion order
+//!   (for the clock hand) while providing O(1) key-based lookups and removals.
+//!
+//! - **Atomic metadata**: Clock bits and frequency counters use atomic types, allowing updates
+//!   during concurrent reads without requiring a write lock.
+
 use std::hash::{BuildHasher, Hasher};
 use std::sync::atomic::Ordering;
 
 use ahash::RandomState;
 use hashbrown::HashMap;
+use hashbrown::hash_map::Entry as HashMapEntry;
 use indexmap::IndexMap;
 
 use crate::erased::{Entry, ErasedKey, ErasedKeyRef};
@@ -70,13 +100,33 @@ impl PolicyBucket {
 		}
 	}
 
+	/// Remove a key from the bucket using O(1) swap_remove.
+	///
+	/// When swap_remove is used, the last element is moved to fill the gap.
+	/// We must adjust the hand position accordingly:
+	/// - If we removed before the hand, decrement hand
+	/// - If we removed at the old last position and hand pointed there, it now points to removed slot
 	fn remove(&mut self, key: &ErasedKey) -> bool {
-		let removed = self.list.shift_remove(key).is_some();
-		// Keep hand in bounds
-		if self.hand >= self.list.len() && !self.list.is_empty() {
-			self.hand = 0;
+		let old_len = self.list.len();
+		if let Some((removed_idx, _, _)) = self.list.swap_remove_full(key) {
+			let new_len = self.list.len();
+			if new_len == 0 {
+				self.hand = 0;
+			} else if removed_idx < self.hand {
+				// Removed before hand, decrement to stay on same logical entry
+				self.hand -= 1;
+			} else if self.hand == old_len - 1 && removed_idx != old_len - 1 {
+				// Hand was pointing to the last element, which got swapped to removed_idx
+				self.hand = removed_idx;
+			}
+			// Keep hand in bounds (handles edge cases)
+			if self.hand >= new_len && new_len > 0 {
+				self.hand = 0;
+			}
+			true
+		} else {
+			false
 		}
-		removed
 	}
 
 	fn clear(&mut self) {
@@ -123,42 +173,66 @@ impl Shard {
 	pub fn insert(&mut self, key: ErasedKey, entry: Entry) -> (Option<Entry>, (usize, usize)) {
 		let size = entry.size;
 		let policy = entry.policy;
-		let mut num_evictions = 0;
-		let mut total_evicted_size = 0;
 
-		// Check if key already exists
-		if let Some(old_entry) = self.entries.get(&key) {
-			let old_policy = old_entry.policy;
-			let old_size = old_entry.size;
+		// Check if key exists and get old metadata (uses raw_entry for single hash computation)
+		let old_info = self
+			.entries
+			.raw_entry()
+			.from_key(&key)
+			.map(|(_, e)| (e.policy, e.size));
 
-			// Remove from old bucket
+		// If key exists, remove from old bucket and adjust size
+		if let Some((old_policy, old_size)) = old_info {
 			self.buckets[old_policy as usize].remove(&key);
 			self.size_current -= old_size;
-
-			// Will re-insert into new bucket below
 		}
 
-		// Evict until we have space
-		const MAX_EVICT_ATTEMPTS: usize = 1000;
-		let mut attempts = 0;
-		while self.size_current + size > self.size_capacity && attempts < MAX_EVICT_ATTEMPTS {
-			if let Some(evicted_size) = self.evict_one() {
-				num_evictions += 1;
-				total_evicted_size += evicted_size;
-				attempts = 0; // Reset on successful eviction
-			} else {
-				attempts += 1; // No eviction, might be stuck
+		// Evict until we have space (must happen before insert to avoid self-eviction)
+		let (num_evictions, total_evicted_size) = self.evict_until_space(size);
+
+		// Now use entry API for the actual insert (hash already computed, fast lookup)
+		let old = match self.entries.entry(key.clone()) {
+			HashMapEntry::Occupied(mut occupied) => Some(occupied.insert(entry)),
+			HashMapEntry::Vacant(vacant) => {
+				vacant.insert(entry);
+				None
 			}
-		}
-
-		// Insert into entries map
-		let old = self.entries.insert(key.clone(), entry);
+		};
 
 		// Add to appropriate bucket
 		self.buckets[policy as usize].insert(key);
 		self.size_current += size;
 
 		(old, (num_evictions, total_evicted_size))
+	}
+
+	/// Evict entries until there's space for `needed_size` bytes.
+	///
+	/// Optimized to batch evictions within the same bucket before moving to next priority,
+	/// reducing bucket priority iteration overhead.
+	/// Returns (num_evictions, total_evicted_size).
+	fn evict_until_space(&mut self, needed_size: usize) -> (usize, usize) {
+		let mut num_evictions = 0;
+		let mut total_evicted_size = 0;
+
+		// Try buckets from lowest priority (Volatile) to highest (Critical)
+		// Stay in each bucket until it's exhausted or we have enough space
+		for policy_idx in (0..NUM_POLICY_BUCKETS).rev() {
+			while self.size_current + needed_size > self.size_capacity {
+				if let Some(evicted_size) = self.evict_from_bucket(policy_idx) {
+					num_evictions += 1;
+					total_evicted_size += evicted_size;
+				} else {
+					break; // This bucket is empty, try next priority
+				}
+			}
+			// Check if we have enough space
+			if self.size_current + needed_size <= self.size_capacity {
+				break;
+			}
+		}
+
+		(num_evictions, total_evicted_size)
 	}
 
 	/// Get an entry by key, updating clock bit and frequency.
@@ -168,7 +242,11 @@ impl Shard {
 		// Set clock bit
 		entry.clock_bit.store(true, Ordering::Relaxed);
 		// Increment frequency (saturating at 255)
-		entry.frequency.fetch_add(1, Ordering::Relaxed);
+		// Using load+store avoids CAS loop overhead; small races are acceptable for heuristic
+		let freq = entry.frequency.load(Ordering::Relaxed);
+		if freq < 255 {
+			entry.frequency.store(freq + 1, Ordering::Relaxed);
+		}
 		Some(entry)
 	}
 
@@ -183,7 +261,11 @@ impl Shard {
 		// Set clock bit
 		entry.clock_bit.store(true, Ordering::Relaxed);
 		// Increment frequency (saturating at 255)
-		entry.frequency.fetch_add(1, Ordering::Relaxed);
+		// Using load+store avoids CAS loop overhead; small races are acceptable for heuristic
+		let freq = entry.frequency.load(Ordering::Relaxed);
+		if freq < 255 {
+			entry.frequency.store(freq + 1, Ordering::Relaxed);
+		}
 
 		Some(entry)
 	}
@@ -221,65 +303,68 @@ impl Shard {
 		self.size_current = 0;
 	}
 
-	/// Evict one entry using weight-stratified clock algorithm.
-	///
-	/// Starts from Volatile bucket and moves to lower priority buckets if needed.
-	/// Returns the size of the evicted entry, or None if no eviction was possible.
-	fn evict_one(&mut self) -> Option<usize> {
-		// Try buckets from lowest priority (Volatile) to highest (Critical)
-		for policy_idx in (0..NUM_POLICY_BUCKETS).rev() {
-			if let Some(evicted_size) = self.evict_from_bucket(policy_idx) {
-				return Some(evicted_size);
-			}
-		}
-		None
-	}
-
 	/// Try to evict one entry from a specific bucket using clock algorithm.
+	///
+	/// Optimized to avoid cloning keys during the sweep - only clones when evicting.
 	fn evict_from_bucket(&mut self, policy_idx: usize) -> Option<usize> {
-		let bucket = &mut self.buckets[policy_idx];
+		let bucket = &self.buckets[policy_idx];
 
 		if bucket.is_empty() {
 			return None;
 		}
 
 		let bucket_len = bucket.len();
+		let mut hand = self.buckets[policy_idx].hand;
 
-		// Do a full sweep of the clock
+		// Phase 1: Sweep to find eviction candidate (read-only on bucket structure)
+		// We track the hand position locally and only clone when we find a victim
 		for _ in 0..bucket_len {
-			// Get key at current hand position
-			let key = bucket.list.get_index(bucket.hand)?.0.clone();
+			// Get key reference at current hand position (no clone)
+			let key_ref = self.buckets[policy_idx].list.get_index(hand)?.0;
 
-			// Get the entry
-			let entry = self.entries.get(&key)?;
+			// Get the entry using the key reference
+			let entry = self.entries.get(key_ref)?;
 
 			let clock_bit = entry.clock_bit.load(Ordering::Relaxed);
 			let frequency = entry.frequency.load(Ordering::Relaxed);
 
 			if clock_bit {
-				// Clear clock bit and advance
+				// Clear clock bit and advance hand
 				entry.clock_bit.store(false, Ordering::Relaxed);
-				bucket.hand = (bucket.hand + 1) % bucket_len;
+				hand += 1;
+				if hand >= bucket_len {
+					hand = 0;
+				}
 			} else if frequency == 0 {
-				// Evict this entry
+				// Found victim - now clone the key and evict
+				let key = key_ref.clone();
+				// Update hand position before modifying bucket
+				self.buckets[policy_idx].hand = hand;
 				let evicted = self.entries.remove(&key)?;
 				let evicted_size = evicted.size;
-				bucket.remove(&key);
+				self.buckets[policy_idx].remove(&key);
 				self.size_current -= evicted_size;
 				return Some(evicted_size);
 			} else {
-				// Decrement frequency and advance
+				// Decrement frequency and advance hand
 				entry.frequency.fetch_sub(1, Ordering::Relaxed);
-				bucket.hand = (bucket.hand + 1) % bucket_len;
+				hand += 1;
+				if hand >= bucket_len {
+					hand = 0;
+				}
 			}
 		}
 
-		// If we've done a full sweep and found nothing, evict the entry at the hand
-		// (this handles the case where all entries have references or high frequency)
-		let key = bucket.list.get_index(bucket.hand)?.0.clone();
+		// Phase 2: Force-evict after a full sweep with no evictions
+		// Design note: We force-evict after a single sweep rather than multiple sweeps.
+		// This guarantees forward progress when all entries are recently accessed.
+		// Trade-off: A high-frequency entry may be evicted before its frequency fully
+		// decays, but this prevents pathological cases where eviction stalls.
+		self.buckets[policy_idx].hand = hand;
+		let key = self.buckets[policy_idx].list.get_index(hand)?.0.clone();
 		let evicted = self.entries.remove(&key)?;
 		let evicted_size = evicted.size;
-		bucket.remove(&key);
+		self.buckets[policy_idx].remove(&key);
 		self.size_current -= evicted_size;
 		Some(evicted_size)
 	}
@@ -438,5 +523,89 @@ mod tests {
 
 		// Clock bit should be set
 		assert_eq!(e.clock_bit.load(Ordering::Relaxed), true);
+	}
+
+	#[test]
+	fn test_insert_oversized_entry_into_empty_shard() {
+		// Test inserting a single entry larger than the shard capacity
+		// This should succeed (allowing the cache to be useful for large items)
+		
+		#[derive(DeepSizeOf)]
+		struct LargeValue {
+			data: Vec<u8>,
+		}
+
+		let mut shard = Shard::new(100);
+
+		let key = make_key(1, CachePolicy::Standard);
+		// Create a value with ~200 bytes of data (Vec overhead + 200 bytes)
+		let large_value = LargeValue {
+			data: vec![0u8; 200],
+		};
+		let entry = Entry::new(large_value, CachePolicy::Standard);
+		let entry_size = entry.size;
+
+		let (old, (num_evictions, _evicted_size)) = shard.insert(key.clone(), entry);
+
+		// Should insert successfully
+		assert!(old.is_none());
+		assert!(shard.contains(&key));
+		assert_eq!(shard.len(), 1);
+		assert_eq!(num_evictions, 0); // No evictions in empty cache
+
+		// Size should exceed capacity (which is acceptable for a single oversized entry)
+		assert_eq!(shard.size_current, entry_size);
+		assert!(shard.size_current > shard.size_capacity, 
+			"Expected size {} > capacity {}", shard.size_current, shard.size_capacity);
+	}
+
+	#[test]
+	fn test_insert_oversized_entry_evicts_existing() {
+		// Test that inserting an oversized entry triggers evictions
+		
+		#[derive(DeepSizeOf)]
+		struct SmallValue {
+			data: Vec<u8>,
+		}
+
+		#[derive(DeepSizeOf)]
+		struct LargeValue {
+			data: Vec<u8>,
+		}
+
+		let mut shard = Shard::new(200);
+
+		// Fill with small entries (~10 bytes each) - should all fit
+		for i in 1..=3 {
+			let key = make_key(i, CachePolicy::Standard);
+			let small_value = SmallValue {
+				data: vec![0u8; 5],
+			};
+			let entry = Entry::new(small_value, CachePolicy::Standard);
+			shard.insert(key, entry);
+		}
+
+		let initial_len = shard.len();
+		assert!(initial_len >= 3, "All 3 small entries should fit initially");
+
+		// Insert oversized entry (~300 bytes, larger than capacity)
+		let big_key = make_key(100, CachePolicy::Standard);
+		let large_value = LargeValue {
+			data: vec![0u8; 300],
+		};
+		let big_entry = Entry::new(large_value, CachePolicy::Standard);
+
+		let (_old, (num_evictions, _evicted_size)) = shard.insert(big_key.clone(), big_entry);
+
+		// Should have triggered evictions (may hit retry limit before evicting all)
+		assert!(num_evictions > 0, "Expected some evictions but got none");
+		
+		// The oversized entry should be inserted
+		assert!(shard.contains(&big_key), "Oversized entry should be inserted");
+		
+		// After inserting oversized entry, old entries should be gone
+		assert!(shard.len() < initial_len + 1, 
+			"Expected fewer than {} entries after eviction, but got {}", 
+			initial_len + 1, shard.len());
 	}
 }

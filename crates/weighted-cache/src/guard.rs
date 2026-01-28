@@ -27,11 +27,12 @@ use parking_lot::RwLockReadGuard;
 /// ```
 pub struct Guard<'a, V> {
 	/// The read lock guard (makes this type !Send automatically)
-	_lock: RwLockReadGuard<'a, crate::shard::Shard>,
+	#[allow(unused)]
+	lock: RwLockReadGuard<'a, crate::shard::Shard>,
 	/// Pointer to the value within the locked shard
 	value: *const V,
 	/// Phantom data to tie the lifetime and type
-	_marker: PhantomData<&'a V>,
+	marker: PhantomData<&'a V>,
 }
 
 impl<'a, V> Guard<'a, V> {
@@ -46,9 +47,9 @@ impl<'a, V> Guard<'a, V> {
 		value: *const V,
 	) -> Self {
 		Self {
-			_lock: lock,
+			lock,
 			value,
-			_marker: PhantomData,
+			marker: PhantomData,
 		}
 	}
 }
@@ -106,16 +107,6 @@ impl<V: Ord> Ord for Guard<'_, V> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-
-	// Test that Guard is !Send
-	// This is a compile-time test - if uncommented, it should fail to compile
-	/*
-	#[test]
-	fn test_guard_is_not_send() {
-		fn assert_send<T: Send>() {}
-		assert_send::<Guard<i32>>();
-	}
-	*/
 
 	// Test that Guard is Sync
 	#[test]

@@ -60,7 +60,7 @@ fn bench_get_hit(c: &mut Criterion) {
 		b.iter(|| {
 			for i in 0..1000 {
 				let key = BenchKey(black_box(i));
-				let _ = cache.get_arc(&key);
+				black_box(cache.get_arc(&key));
 			}
 		});
 	});
@@ -84,7 +84,7 @@ fn bench_get_arc_vs_get_clone(c: &mut Criterion) {
 	group.bench_function("get_arc", |b| {
 		b.iter(|| {
 			for i in 0..100 {
-				let _ = cache.get_arc(&BenchKey(black_box(i)));
+				black_box(cache.get_arc(&BenchKey(black_box(i))));
 			}
 		});
 	});
@@ -92,7 +92,7 @@ fn bench_get_arc_vs_get_clone(c: &mut Criterion) {
 	group.bench_function("get_clone", |b| {
 		b.iter(|| {
 			for i in 0..100 {
-				let _ = cache.get_clone(&BenchKey(black_box(i)));
+				black_box(cache.get_clone(&BenchKey(black_box(i))));
 			}
 		});
 	});
@@ -126,7 +126,7 @@ fn bench_mixed_workload(c: &mut Criterion) {
 					);
 				} else {
 					// 80% reads
-					let _ = cache.get_arc(&BenchKey(black_box(i % 500)));
+					black_box(cache.get_arc(&BenchKey(black_box(i % 500))));
 				}
 			}
 		});
@@ -156,7 +156,7 @@ fn bench_concurrent_reads(c: &mut Criterion) {
 				let cache = cache.clone();
 				handles.push(thread::spawn(move || {
 					for i in 0..250 {
-						let _ = cache.get_arc(&BenchKey(i));
+						black_box(cache.get_arc(&BenchKey(black_box(i))));
 					}
 				}));
 			}
@@ -200,15 +200,19 @@ fn bench_hit_rate_zipf(c: &mut Criterion) {
 	c.bench_function("zipf_distribution", |b| {
 		b.iter(|| {
 			for &key_id in &zipf_keys {
-				if cache.contains(&BenchKey(key_id)) {
-					let _ = cache.get_arc(&BenchKey(key_id));
-				} else {
-					cache.insert(
-						BenchKey(key_id),
-						BenchValue {
-							data: vec![0u8; 64],
-						},
-					);
+				let key = BenchKey(black_box(key_id));
+				match cache.get_arc(&key) {
+					Some(val) => {
+						black_box(val);
+					}
+					None => {
+						cache.insert(
+							key,
+							BenchValue {
+								data: vec![0u8; 64],
+							},
+						);
+					}
 				}
 			}
 		});
@@ -222,12 +226,16 @@ fn bench_hit_rate_zipf(c: &mut Criterion) {
 fn bench_comparison_insert(c: &mut Criterion) {
 	let mut group = c.benchmark_group("comparison/insert");
 
+	// Use same item capacity for fair comparison
+	const CACHE_CAPACITY: usize = 20000;
+
 	for size in [100, 1000, 10000] {
 		group.throughput(Throughput::Elements(size));
 
 		group.bench_with_input(BenchmarkId::new("weighted_cache", size), &size, |b, &size| {
 			b.iter(|| {
-				let cache = Cache::new(1024 * 1024);
+				// Estimate ~100 bytes per entry (64 byte value + key + Arc overhead)
+				let cache = Cache::new(CACHE_CAPACITY * 100);
 				for i in 0..size {
 					let key = BenchKey(i);
 					let value = BenchValue {
@@ -240,7 +248,7 @@ fn bench_comparison_insert(c: &mut Criterion) {
 
 		group.bench_with_input(BenchmarkId::new("quick_cache", size), &size, |b, &size| {
 			b.iter(|| {
-				let cache = QuickCache::new(10000);
+				let cache = QuickCache::new(CACHE_CAPACITY);
 				for i in 0..size {
 					let key = i;
 					let value = vec![0u8; 64];
@@ -256,9 +264,13 @@ fn bench_comparison_insert(c: &mut Criterion) {
 fn bench_comparison_get_hit(c: &mut Criterion) {
 	let mut group = c.benchmark_group("comparison/get_hit");
 
-	// weighted-cache setup
-	let weighted_cache = Arc::new(Cache::new(1024 * 1024));
-	for i in 0..1000 {
+	// Use same item capacity for fair comparison
+	const NUM_ITEMS: u64 = 1000;
+	const CACHE_CAPACITY: usize = 2000;
+
+	// weighted-cache setup (~100 bytes per entry)
+	let weighted_cache = Arc::new(Cache::new(CACHE_CAPACITY * 100));
+	for i in 0..NUM_ITEMS {
 		weighted_cache.insert(
 			BenchKey(i),
 			BenchValue {
@@ -268,24 +280,24 @@ fn bench_comparison_get_hit(c: &mut Criterion) {
 	}
 
 	// quick_cache setup
-	let quick_cache = Arc::new(QuickCache::new(10000));
-	for i in 0..1000u64 {
+	let quick_cache = Arc::new(QuickCache::new(CACHE_CAPACITY));
+	for i in 0..NUM_ITEMS {
 		quick_cache.insert(i, vec![0u8; 64]);
 	}
 
 	group.bench_function("weighted_cache", |b| {
 		b.iter(|| {
-			for i in 0..1000 {
+			for i in 0..NUM_ITEMS {
 				let key = BenchKey(black_box(i));
-				let _ = weighted_cache.get(&key);
+				black_box(weighted_cache.get(&key));
 			}
 		});
 	});
 
 	group.bench_function("quick_cache", |b| {
 		b.iter(|| {
-			for i in 0..1000u64 {
-				let _ = quick_cache.get(&black_box(i));
+			for i in 0..NUM_ITEMS {
+				black_box(quick_cache.get(&black_box(i)));
 			}
 		});
 	});
@@ -296,9 +308,13 @@ fn bench_comparison_get_hit(c: &mut Criterion) {
 fn bench_comparison_mixed_workload(c: &mut Criterion) {
 	let mut group = c.benchmark_group("comparison/mixed_80_20");
 
-	// weighted-cache setup
-	let weighted_cache = Arc::new(Cache::new(1024 * 1024));
-	for i in 0..500 {
+	// Use same item capacity for fair comparison
+	const NUM_ITEMS: u64 = 500;
+	const CACHE_CAPACITY: usize = 1000;
+
+	// weighted-cache setup (~100 bytes per entry)
+	let weighted_cache = Arc::new(Cache::new(CACHE_CAPACITY * 100));
+	for i in 0..NUM_ITEMS {
 		weighted_cache.insert(
 			BenchKey(i),
 			BenchValue {
@@ -308,14 +324,14 @@ fn bench_comparison_mixed_workload(c: &mut Criterion) {
 	}
 
 	// quick_cache setup
-	let quick_cache = Arc::new(QuickCache::new(10000));
-	for i in 0..500u64 {
+	let quick_cache = Arc::new(QuickCache::new(CACHE_CAPACITY));
+	for i in 0..NUM_ITEMS {
 		quick_cache.insert(i, vec![0u8; 64]);
 	}
 
 	group.bench_function("weighted_cache", |b| {
 		b.iter(|| {
-			for i in 0..100 {
+			for i in 0..100u64 {
 				if i % 5 == 0 {
 					// 20% writes
 					weighted_cache.insert(
@@ -326,7 +342,7 @@ fn bench_comparison_mixed_workload(c: &mut Criterion) {
 					);
 				} else {
 					// 80% reads
-					let _ = weighted_cache.get(&BenchKey(black_box(i % 500)));
+					black_box(weighted_cache.get(&BenchKey(black_box(i % NUM_ITEMS))));
 				}
 			}
 		});
@@ -340,7 +356,7 @@ fn bench_comparison_mixed_workload(c: &mut Criterion) {
 					quick_cache.insert(black_box(i), vec![0u8; 64]);
 				} else {
 					// 80% reads
-					let _ = quick_cache.get(&black_box(i % 500));
+					black_box(quick_cache.get(&black_box(i % NUM_ITEMS)));
 				}
 			}
 		});
@@ -354,9 +370,13 @@ fn bench_comparison_concurrent_reads(c: &mut Criterion) {
 
 	let mut group = c.benchmark_group("comparison/concurrent_reads_4_threads");
 
-	// weighted-cache setup
-	let weighted_cache = Arc::new(Cache::new(1024 * 1024));
-	for i in 0..1000 {
+	// Use same item capacity for fair comparison
+	const NUM_ITEMS: u64 = 1000;
+	const CACHE_CAPACITY: usize = 2000;
+
+	// weighted-cache setup (~100 bytes per entry)
+	let weighted_cache = Arc::new(Cache::new(CACHE_CAPACITY * 100));
+	for i in 0..NUM_ITEMS {
 		weighted_cache.insert(
 			BenchKey(i),
 			BenchValue {
@@ -366,8 +386,8 @@ fn bench_comparison_concurrent_reads(c: &mut Criterion) {
 	}
 
 	// quick_cache setup
-	let quick_cache = Arc::new(QuickCache::new(10000));
-	for i in 0..1000u64 {
+	let quick_cache = Arc::new(QuickCache::new(CACHE_CAPACITY));
+	for i in 0..NUM_ITEMS {
 		quick_cache.insert(i, vec![0u8; 64]);
 	}
 
@@ -378,8 +398,8 @@ fn bench_comparison_concurrent_reads(c: &mut Criterion) {
 			for _ in 0..4 {
 				let cache = weighted_cache.clone();
 				handles.push(thread::spawn(move || {
-					for i in 0..250 {
-						let _ = cache.get(&BenchKey(i));
+					for i in 0..250u64 {
+						black_box(cache.get(&BenchKey(black_box(i))));
 					}
 				}));
 			}
@@ -398,7 +418,7 @@ fn bench_comparison_concurrent_reads(c: &mut Criterion) {
 				let cache = quick_cache.clone();
 				handles.push(thread::spawn(move || {
 					for i in 0..250u64 {
-						let _ = cache.get(&i);
+						black_box(cache.get(&black_box(i)));
 					}
 				}));
 			}
@@ -415,12 +435,17 @@ fn bench_comparison_concurrent_reads(c: &mut Criterion) {
 fn bench_comparison_eviction_pressure(c: &mut Criterion) {
 	let mut group = c.benchmark_group("comparison/eviction_pressure");
 
+	// Use same effective item capacity for fair comparison
+	// Both caches should hold ~100 items before eviction starts
+	const CACHE_CAPACITY: usize = 100;
+
 	group.bench_function("weighted_cache", |b| {
 		b.iter(|| {
-			let cache = Cache::new(10240); // Small cache to trigger eviction
+			// ~150 bytes per entry (100 byte value + key + Arc overhead)
+			let cache = Cache::new(CACHE_CAPACITY * 150);
 
 			// Insert many items, forcing eviction
-			for i in 0..1000 {
+			for i in 0..1000u64 {
 				cache.insert(
 					BenchKey(black_box(i)),
 					BenchValue {
@@ -433,7 +458,7 @@ fn bench_comparison_eviction_pressure(c: &mut Criterion) {
 
 	group.bench_function("quick_cache", |b| {
 		b.iter(|| {
-			let cache = QuickCache::new(100); // Small cache to trigger eviction
+			let cache = QuickCache::new(CACHE_CAPACITY);
 
 			// Insert many items, forcing eviction
 			for i in 0..1000u64 {
@@ -448,6 +473,9 @@ fn bench_comparison_eviction_pressure(c: &mut Criterion) {
 fn bench_comparison_zipf_distribution(c: &mut Criterion) {
 	let mut group = c.benchmark_group("comparison/zipf_distribution");
 
+	// Use same item capacity for fair comparison
+	const CACHE_CAPACITY: usize = 200;
+
 	// Simulate Zipf distribution: some keys are accessed much more frequently
 	let zipf_keys: Vec<u64> = (0..100)
 		.flat_map(|i| {
@@ -456,24 +484,28 @@ fn bench_comparison_zipf_distribution(c: &mut Criterion) {
 		})
 		.collect();
 
-	// weighted-cache setup
-	let weighted_cache = Arc::new(Cache::new(1024 * 1024));
+	// weighted-cache setup (~100 bytes per entry)
+	let weighted_cache = Arc::new(Cache::new(CACHE_CAPACITY * 100));
 
 	// quick_cache setup
-	let quick_cache = Arc::new(QuickCache::new(10000));
+	let quick_cache = Arc::new(QuickCache::new(CACHE_CAPACITY));
 
 	group.bench_function("weighted_cache", |b| {
 		b.iter(|| {
 			for &key_id in &zipf_keys {
-				if weighted_cache.contains(&BenchKey(key_id)) {
-					let _ = weighted_cache.get(&BenchKey(key_id));
-				} else {
-					weighted_cache.insert(
-						BenchKey(key_id),
-						BenchValue {
-							data: vec![0u8; 64],
-						},
-					);
+				let key = BenchKey(black_box(key_id));
+				match weighted_cache.get(&key) {
+					Some(val) => {
+						black_box(val);
+					}
+					None => {
+						weighted_cache.insert(
+							key,
+							BenchValue {
+								data: vec![0u8; 64],
+							},
+						);
+					}
 				}
 			}
 		});
@@ -482,10 +514,14 @@ fn bench_comparison_zipf_distribution(c: &mut Criterion) {
 	group.bench_function("quick_cache", |b| {
 		b.iter(|| {
 			for &key_id in &zipf_keys {
-				if quick_cache.get(&key_id).is_some() {
-					let _ = quick_cache.get(&key_id);
-				} else {
-					quick_cache.insert(key_id, vec![0u8; 64]);
+				let key = black_box(key_id);
+				match quick_cache.get(&key) {
+					Some(val) => {
+						black_box(val);
+					}
+					None => {
+						quick_cache.insert(key, vec![0u8; 64]);
+					}
 				}
 			}
 		});

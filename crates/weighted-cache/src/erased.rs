@@ -18,6 +18,8 @@ pub(crate) struct ErasedKey {
 	pub hash: u64,
 	/// The actual key, boxed and type-erased
 	pub data: Arc<dyn Any + Send + Sync>,
+	/// Equality comparison function for handling hash collisions correctly
+	eq_fn: fn(&Arc<dyn Any + Send + Sync>, &Arc<dyn Any + Send + Sync>) -> bool,
 }
 
 impl ErasedKey {
@@ -25,10 +27,24 @@ impl ErasedKey {
 	pub fn new<K: CacheKey>(key: &K) -> Self {
 		let type_id = TypeId::of::<K>();
 		let hash = Self::compute_hash(type_id, key);
+		
+		// Create a monomorphized equality function for this key type.
+		// The compiler will generate one instance per concrete K type.
+		fn eq_impl<K: CacheKey>(
+			a: &Arc<dyn Any + Send + Sync>,
+			b: &Arc<dyn Any + Send + Sync>,
+		) -> bool {
+			match (a.downcast_ref::<K>(), b.downcast_ref::<K>()) {
+				(Some(a_key), Some(b_key)) => a_key == b_key,
+				_ => false,
+			}
+		}
+		
 		Self {
 			type_id,
 			hash,
 			data: Arc::new(key.clone()),
+			eq_fn: eq_impl::<K>,
 		}
 	}
 
@@ -69,29 +85,34 @@ impl Hash for ErasedKey {
 
 impl PartialEq for ErasedKey {
 	fn eq(&self, other: &Self) -> bool {
-		// Fast path: compare hashes and TypeIds
+		// Fast path: different hash or type means not equal
 		if self.hash != other.hash || self.type_id != other.type_id {
 			return false;
 		}
 
-		// Fast path: if same Arc, they're equal
+		// Fast path: if same Arc pointer, they're definitely equal
 		if Arc::ptr_eq(&self.data, &other.data) {
 			return true;
 		}
 
-		// For hash collisions or different instances of the same key,
-		// we can't easily do deep comparison without knowing the type.
-		// However, if hash and type_id match, we'll consider them equal.
-		// This is safe because:
-		// 1. TypeId ensures they're the same type
-		// 2. Hash collision is extremely rare with ahash
-		// 3. Even if there's a collision, the HashMap will use the hash for bucketing and then use
-		//    this eq for final comparison
-		true
+		// Proper comparison using stored equality function.
+		// This correctly handles hash collisions by comparing actual keys.
+		(self.eq_fn)(&self.data, &other.data)
 	}
 }
 
 impl Eq for ErasedKey {}
+
+impl std::fmt::Debug for ErasedKey {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("ErasedKey")
+			.field("type_id", &self.type_id)
+			.field("hash", &self.hash)
+			.field("data", &"<Arc<dyn Any>>")
+			.field("eq_fn", &"<fn>")
+			.finish()
+	}
+}
 
 /// Borrowed reference to a cache key for zero-allocation lookups.
 ///
@@ -218,6 +239,37 @@ mod tests {
 
 		assert!(erased1.equals(&key2));
 		assert!(!erased1.equals(&key3));
+	}
+
+	#[test]
+	fn test_erased_key_partialeq() {
+		// Test that PartialEq correctly distinguishes different keys
+		let key1 = TestKey(42);
+		let key2 = TestKey(42);
+		let key3 = TestKey(99);
+
+		let erased1 = ErasedKey::new(&key1);
+		let erased2 = ErasedKey::new(&key2);
+		let erased3 = ErasedKey::new(&key3);
+
+		// Same value keys should be equal
+		assert_eq!(erased1, erased2);
+		
+		// Different value keys should not be equal
+		assert_ne!(erased1, erased3);
+		assert_ne!(erased2, erased3);
+	}
+
+	#[test]
+	fn test_erased_key_arc_ptr_eq_optimization() {
+		// Test that Arc::ptr_eq fast path works
+		let key = TestKey(42);
+		let erased = ErasedKey::new(&key);
+		let erased_clone = erased.clone();
+
+		// Cloned ErasedKey should be equal (Arc pointers are the same)
+		assert_eq!(erased, erased_clone);
+		assert!(Arc::ptr_eq(&erased.data, &erased_clone.data));
 	}
 
 	#[test]
