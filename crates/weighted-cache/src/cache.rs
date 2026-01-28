@@ -1,10 +1,11 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use parking_lot::RwLock;
 
 use crate::erased::{Entry, ErasedKey, ErasedKeyRef};
 use crate::guard::Guard;
+use crate::metrics::CacheMetrics;
 use crate::shard::Shard;
 use crate::traits::CacheKey;
 
@@ -35,6 +36,20 @@ pub struct Cache {
 	entry_count: AtomicUsize,
 	/// Number of shards
 	shard_count: usize,
+	/// Maximum capacity in bytes
+	max_size_bytes: usize,
+	/// Metrics: cache hits
+	hits: AtomicU64,
+	/// Metrics: cache misses
+	misses: AtomicU64,
+	/// Metrics: new inserts
+	inserts: AtomicU64,
+	/// Metrics: updates (replaced existing key)
+	updates: AtomicU64,
+	/// Metrics: evictions
+	evictions: AtomicU64,
+	/// Metrics: explicit removals
+	removals: AtomicU64,
 }
 
 impl Cache {
@@ -64,6 +79,13 @@ impl Cache {
 			current_size: AtomicUsize::new(0),
 			entry_count: AtomicUsize::new(0),
 			shard_count,
+			max_size_bytes,
+			hits: AtomicU64::new(0),
+			misses: AtomicU64::new(0),
+			inserts: AtomicU64::new(0),
+			updates: AtomicU64::new(0),
+			evictions: AtomicU64::new(0),
+			removals: AtomicU64::new(0),
 		}
 	}
 
@@ -100,16 +122,22 @@ impl Cache {
 			} else {
 				self.current_size.fetch_sub((-size_diff) as usize, Ordering::Relaxed);
 			}
+			// Metrics: track update
+			self.updates.fetch_add(1, Ordering::Relaxed);
 		} else {
 			// New entry
 			self.current_size.fetch_add(entry_size, Ordering::Relaxed);
 			self.entry_count.fetch_add(1, Ordering::Relaxed);
+			// Metrics: track insert
+			self.inserts.fetch_add(1, Ordering::Relaxed);
 		}
 
 		// Account for evictions
 		if num_evictions > 0 {
 			self.entry_count.fetch_sub(num_evictions, Ordering::Relaxed);
 			self.current_size.fetch_sub(evicted_size, Ordering::Relaxed);
+			// Metrics: track evictions
+			self.evictions.fetch_add(num_evictions as u64, Ordering::Relaxed);
 		}
 
 		old_entry.and_then(|e| e.value_arc::<K::Value>())
@@ -136,7 +164,14 @@ impl Cache {
 		let shard = shard_lock.read();
 
 		// Look up entry (bumps reference counter internally, zero allocation)
-		let entry = shard.get_ref(&key_ref)?;
+		let Some(entry) = shard.get_ref(&key_ref) else {
+			// Metrics: track miss
+			self.misses.fetch_add(1, Ordering::Relaxed);
+			return None;
+		};
+
+		// Metrics: track hit
+		self.hits.fetch_add(1, Ordering::Relaxed);
 
 		// Get pointer to value
 		let value_ptr = entry.value.as_ref() as *const _ as *const K::Value;
@@ -162,10 +197,18 @@ impl Cache {
 
 		// Short-lived read lock
 		let shard = shard_lock.read();
-		let entry = shard.get_ref(&key_ref)?; // Zero-allocation lookup
-		let arc = entry.value_arc::<K::Value>()?;
+		let entry = shard.get_ref(&key_ref); // Zero-allocation lookup
 
-		Some(arc)
+		if let Some(entry) = entry {
+			// Metrics: track hit
+			self.hits.fetch_add(1, Ordering::Relaxed);
+			let arc = entry.value_arc::<K::Value>()?;
+			Some(arc)
+		} else {
+			// Metrics: track miss
+			self.misses.fetch_add(1, Ordering::Relaxed);
+			None
+		}
 	}
 
 	/// Retrieve a cloned value. Safe to hold across `.await` points.
@@ -206,6 +249,9 @@ impl Cache {
 
 		self.current_size.fetch_sub(entry.size, Ordering::Relaxed);
 		self.entry_count.fetch_sub(1, Ordering::Relaxed);
+
+		// Metrics: track removal
+		self.removals.fetch_add(1, Ordering::Relaxed);
 
 		entry.value_arc::<K::Value>()
 	}
@@ -250,6 +296,46 @@ impl Cache {
 		}
 		self.current_size.store(0, Ordering::Relaxed);
 		self.entry_count.store(0, Ordering::Relaxed);
+
+		// Reset all metrics
+		self.hits.store(0, Ordering::Relaxed);
+		self.misses.store(0, Ordering::Relaxed);
+		self.inserts.store(0, Ordering::Relaxed);
+		self.updates.store(0, Ordering::Relaxed);
+		self.evictions.store(0, Ordering::Relaxed);
+		self.removals.store(0, Ordering::Relaxed);
+	}
+
+	/// Get performance metrics snapshot.
+	///
+	/// Returns a snapshot of cache performance metrics including hits, misses,
+	/// evictions, and memory utilization.
+	///
+	/// # Example
+	///
+	/// ```
+	/// use weighted_cache::Cache;
+	///
+	/// let cache = Cache::new(1024 * 1024);
+	/// // ... perform cache operations ...
+	///
+	/// let metrics = cache.metrics();
+	/// println!("Hit rate: {:.2}%", metrics.hit_rate() * 100.0);
+	/// println!("Cache utilization: {:.2}%", metrics.utilization() * 100.0);
+	/// println!("Total evictions: {}", metrics.evictions);
+	/// ```
+	pub fn metrics(&self) -> CacheMetrics {
+		CacheMetrics {
+			hits: self.hits.load(Ordering::Relaxed),
+			misses: self.misses.load(Ordering::Relaxed),
+			inserts: self.inserts.load(Ordering::Relaxed),
+			updates: self.updates.load(Ordering::Relaxed),
+			evictions: self.evictions.load(Ordering::Relaxed),
+			removals: self.removals.load(Ordering::Relaxed),
+			current_size_bytes: self.current_size.load(Ordering::Relaxed),
+			capacity_bytes: self.max_size_bytes,
+			entry_count: self.entry_count.load(Ordering::Relaxed),
+		}
 	}
 
 	/// Get the shard for a given hash.

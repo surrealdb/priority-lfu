@@ -117,6 +117,95 @@ let cache = CacheBuilder::new(1024 * 1024 * 512) // 512 MB
     .build();
 ```
 
+## Metrics
+
+The cache provides comprehensive performance metrics for monitoring and debugging:
+
+```rust
+use weighted_cache::Cache;
+
+let cache = Cache::new(1024 * 1024);
+
+// Perform some operations
+cache.insert(key1, value1);
+cache.insert(key2, value2);
+cache.get_arc(&key1);  // hit
+cache.get_arc(&key3);  // miss
+
+// Get metrics snapshot
+let metrics = cache.metrics();
+
+// Access counters
+println!("Cache hits: {}", metrics.hits);
+println!("Cache misses: {}", metrics.misses);
+println!("Inserts: {}", metrics.inserts);
+println!("Updates: {}", metrics.updates);
+println!("Evictions: {}", metrics.evictions);
+println!("Removals: {}", metrics.removals);
+
+// Computed metrics
+println!("Hit rate: {:.2}%", metrics.hit_rate() * 100.0);
+println!("Utilization: {:.2}%", metrics.utilization() * 100.0);
+println!("Total accesses: {}", metrics.total_accesses());
+println!("Total writes: {}", metrics.total_writes());
+
+// Size and capacity
+println!("Current size: {} bytes", metrics.current_size_bytes);
+println!("Capacity: {} bytes", metrics.capacity_bytes);
+println!("Entry count: {}", metrics.entry_count);
+```
+
+### Available Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `hits` | `u64` | Number of successful cache lookups |
+| `misses` | `u64` | Number of failed cache lookups (key not found) |
+| `inserts` | `u64` | Number of new entries inserted |
+| `updates` | `u64` | Number of existing entries updated (key already existed) |
+| `evictions` | `u64` | Number of entries evicted due to capacity constraints |
+| `removals` | `u64` | Number of entries explicitly removed via `remove()` |
+| `current_size_bytes` | `usize` | Current total size in bytes |
+| `capacity_bytes` | `usize` | Maximum capacity in bytes |
+| `entry_count` | `usize` | Current number of entries |
+
+### Computed Metrics
+
+The `CacheMetrics` struct provides helper methods for computed metrics:
+
+- `hit_rate()` - Returns cache hit rate as a ratio (0.0 to 1.0)
+- `utilization()` - Returns memory utilization as a ratio (0.0 to 1.0)
+- `total_accesses()` - Returns total cache accesses (hits + misses)
+- `total_writes()` - Returns total write operations (inserts + updates)
+
+### Integration Example
+
+Example of integrating with a monitoring system:
+
+```rust
+use std::time::Duration;
+use std::sync::Arc;
+
+async fn monitor_cache(cache: Arc<Cache>) {
+    loop {
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        
+        let metrics = cache.metrics();
+        
+        // Send to your monitoring system (Prometheus, etc.)
+        if metrics.hit_rate() < 0.5 {
+            eprintln!("Warning: Cache hit rate is low: {:.2}%", 
+                     metrics.hit_rate() * 100.0);
+        }
+        
+        if metrics.utilization() > 0.9 {
+            eprintln!("Warning: Cache utilization is high: {:.2}%",
+                     metrics.utilization() * 100.0);
+        }
+    }
+}
+```
+
 ## How It Works
 
 ### Weight-Stratified Clock Algorithm

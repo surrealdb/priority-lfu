@@ -711,3 +711,271 @@ fn test_frequency_decays_during_sweep() {
 	let remaining = (1..=20).filter(|&i| cache.contains(&StandardKey(i))).count();
 	assert!(remaining < 20, "Some StandardKey entries should be evicted");
 }
+
+// ============================================================================
+// Metrics Tests
+// ============================================================================
+
+#[test]
+fn test_metrics_hit_miss_counters() {
+	let cache = Cache::new(1024);
+
+	// Initially all metrics should be zero
+	let metrics = cache.metrics();
+	assert_eq!(metrics.hits, 0);
+	assert_eq!(metrics.misses, 0);
+	assert_eq!(metrics.hit_rate(), 0.0);
+
+	// Insert some values
+	cache.insert(IntKey(1), IntValue(100));
+	cache.insert(IntKey(2), IntValue(200));
+
+	// Hit on existing key
+	assert!(cache.get_arc(&IntKey(1)).is_some());
+	assert!(cache.get_arc(&IntKey(2)).is_some());
+
+	// Miss on non-existent key
+	assert!(cache.get_arc(&IntKey(3)).is_none());
+	assert!(cache.get_arc(&IntKey(4)).is_none());
+
+	let metrics = cache.metrics();
+	assert_eq!(metrics.hits, 2, "Should have 2 hits");
+	assert_eq!(metrics.misses, 2, "Should have 2 misses");
+	assert_eq!(metrics.hit_rate(), 0.5, "Hit rate should be 50%");
+	assert_eq!(metrics.total_accesses(), 4);
+}
+
+#[test]
+fn test_metrics_insert_update_counters() {
+	let cache = Cache::new(1024);
+
+	// Insert new keys
+	cache.insert(IntKey(1), IntValue(100));
+	cache.insert(IntKey(2), IntValue(200));
+	cache.insert(IntKey(3), IntValue(300));
+
+	let metrics = cache.metrics();
+	assert_eq!(metrics.inserts, 3, "Should have 3 inserts");
+	assert_eq!(metrics.updates, 0, "Should have 0 updates");
+	assert_eq!(metrics.total_writes(), 3);
+
+	// Update existing keys
+	cache.insert(IntKey(1), IntValue(101));
+	cache.insert(IntKey(2), IntValue(201));
+
+	let metrics = cache.metrics();
+	assert_eq!(metrics.inserts, 3, "Inserts should remain 3");
+	assert_eq!(metrics.updates, 2, "Should have 2 updates");
+	assert_eq!(metrics.total_writes(), 5);
+}
+
+#[test]
+fn test_metrics_eviction_counter() {
+	// Small cache that will trigger eviction
+	let cache = Cache::with_shards(300, 4);
+
+	let metrics = cache.metrics();
+	assert_eq!(metrics.evictions, 0, "Initially no evictions");
+
+	// Fill cache with larger values beyond capacity to trigger evictions
+	for i in 0..50 {
+		cache.insert(IntKey(i), IntValue(i as i64));
+	}
+
+	let metrics = cache.metrics();
+	// With limited capacity and 50 entries, evictions should definitely occur
+	assert!(
+		metrics.evictions > 0,
+		"Should have evictions when over capacity (evictions: {}, inserts: {}, entries: {})",
+		metrics.evictions,
+		metrics.inserts,
+		metrics.entry_count
+	);
+	assert!(
+		metrics.inserts > metrics.entry_count as u64,
+		"More inserts than current entries means evictions occurred"
+	);
+}
+
+#[test]
+fn test_metrics_removal_counter() {
+	let cache = Cache::new(1024);
+
+	// Insert and remove
+	cache.insert(IntKey(1), IntValue(100));
+	cache.insert(IntKey(2), IntValue(200));
+	cache.insert(IntKey(3), IntValue(300));
+
+	let metrics = cache.metrics();
+	assert_eq!(metrics.removals, 0, "No removals yet");
+
+	cache.remove(&IntKey(1));
+	cache.remove(&IntKey(2));
+
+	let metrics = cache.metrics();
+	assert_eq!(metrics.removals, 2, "Should have 2 removals");
+
+	// Remove non-existent key shouldn't increment counter
+	cache.remove(&IntKey(999));
+	let metrics = cache.metrics();
+	assert_eq!(metrics.removals, 2, "Removals should still be 2");
+}
+
+#[test]
+fn test_metrics_size_and_utilization() {
+	let capacity = 1024usize;
+	let cache = Cache::new(capacity);
+
+	let metrics = cache.metrics();
+	assert_eq!(metrics.capacity_bytes, capacity);
+	assert_eq!(metrics.current_size_bytes, 0);
+	assert_eq!(metrics.utilization(), 0.0);
+
+	// Insert some data
+	cache.insert(IntKey(1), IntValue(100));
+	cache.insert(IntKey(2), IntValue(200));
+
+	let metrics = cache.metrics();
+	assert!(metrics.current_size_bytes > 0, "Size should increase after insert");
+	assert!(metrics.utilization() > 0.0, "Utilization should be > 0");
+	assert!(metrics.utilization() <= 1.0, "Utilization should be <= 1.0");
+}
+
+#[test]
+fn test_metrics_entry_count() {
+	let cache = Cache::new(1024);
+
+	let metrics = cache.metrics();
+	assert_eq!(metrics.entry_count, 0);
+
+	// Insert entries
+	for i in 0..10 {
+		cache.insert(IntKey(i), IntValue(i as i64));
+	}
+
+	let metrics = cache.metrics();
+	assert_eq!(metrics.entry_count, 10);
+
+	// Remove some
+	cache.remove(&IntKey(0));
+	cache.remove(&IntKey(1));
+
+	let metrics = cache.metrics();
+	assert_eq!(metrics.entry_count, 8);
+}
+
+#[test]
+fn test_metrics_clear_resets_counters() {
+	let cache = Cache::new(1024);
+
+	// Generate some metrics
+	cache.insert(IntKey(1), IntValue(100));
+	cache.insert(IntKey(2), IntValue(200));
+	cache.get_arc(&IntKey(1));
+	cache.get_arc(&IntKey(3)); // miss
+	cache.remove(&IntKey(2));
+
+	let metrics = cache.metrics();
+	assert!(metrics.inserts > 0);
+	assert!(metrics.hits > 0);
+	assert!(metrics.misses > 0);
+	assert!(metrics.removals > 0);
+
+	// Clear should reset everything
+	cache.clear();
+
+	let metrics = cache.metrics();
+	assert_eq!(metrics.hits, 0, "Hits should be reset");
+	assert_eq!(metrics.misses, 0, "Misses should be reset");
+	assert_eq!(metrics.inserts, 0, "Inserts should be reset");
+	assert_eq!(metrics.updates, 0, "Updates should be reset");
+	assert_eq!(metrics.evictions, 0, "Evictions should be reset");
+	assert_eq!(metrics.removals, 0, "Removals should be reset");
+	assert_eq!(metrics.entry_count, 0, "Entry count should be reset");
+	assert_eq!(metrics.current_size_bytes, 0, "Size should be reset");
+}
+
+#[test]
+fn test_metrics_computed_methods() {
+	let cache = Cache::new(1024);
+
+	// Test hit_rate with no accesses
+	let metrics = cache.metrics();
+	assert_eq!(metrics.hit_rate(), 0.0);
+
+	// Create some hits and misses
+	cache.insert(IntKey(1), IntValue(100));
+	cache.get_arc(&IntKey(1)); // hit
+	cache.get_arc(&IntKey(1)); // hit
+	cache.get_arc(&IntKey(1)); // hit
+	cache.get_arc(&IntKey(2)); // miss
+
+	let metrics = cache.metrics();
+	assert_eq!(metrics.hit_rate(), 0.75); // 3 hits out of 4 accesses
+	assert_eq!(metrics.total_accesses(), 4);
+
+	// Test utilization
+	assert!(metrics.utilization() >= 0.0);
+	assert!(metrics.utilization() <= 1.0);
+
+	// Test total_writes
+	cache.insert(IntKey(2), IntValue(200)); // insert
+	cache.insert(IntKey(1), IntValue(101)); // update
+
+	let metrics = cache.metrics();
+	assert_eq!(metrics.total_writes(), 3); // 2 inserts + 1 update
+}
+
+#[test]
+fn test_metrics_with_get_method() {
+	let cache = Cache::new(1024);
+
+	cache.insert(IntKey(1), IntValue(100));
+
+	// Test that get() also tracks metrics
+	{
+		let _guard = cache.get(&IntKey(1));
+		// guard dropped here
+	}
+
+	let metrics = cache.metrics();
+	assert_eq!(metrics.hits, 1);
+
+	{
+		let _guard = cache.get(&IntKey(999));
+		// None, guard dropped
+	}
+
+	let metrics = cache.metrics();
+	assert_eq!(metrics.misses, 1);
+}
+
+#[test]
+fn test_metrics_concurrent_updates() {
+	let cache = Arc::new(Cache::new(10240));
+	let mut handles = vec![];
+
+	// Spawn multiple threads performing operations
+	for t in 0..4 {
+		let cache = cache.clone();
+		handles.push(thread::spawn(move || {
+			for i in 0..100 {
+				let key = IntKey(t * 100 + i);
+				cache.insert(key.clone(), IntValue(i as i64));
+				cache.get_arc(&key);
+			}
+		}));
+	}
+
+	for handle in handles {
+		handle.join().unwrap();
+	}
+
+	let metrics = cache.metrics();
+	// Should have 400 inserts (4 threads * 100 each)
+	assert_eq!(metrics.inserts, 400);
+	// Should have 400 hits (each get after insert)
+	assert_eq!(metrics.hits, 400);
+	assert_eq!(metrics.misses, 0);
+	assert_eq!(metrics.hit_rate(), 1.0);
+}
