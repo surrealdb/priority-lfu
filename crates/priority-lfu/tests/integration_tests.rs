@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::thread;
 
-use weighted_cache::{Cache, CacheBuilder, CacheKey, CachePolicy, DeepSizeOf};
+use priority_lfu::{Cache, CacheBuilder, CacheKey, CachePolicy, DeepSizeOf};
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
 struct StringKey(String);

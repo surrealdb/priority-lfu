@@ -1,5 +1,5 @@
+use priority_lfu::{Cache, CacheKey, DeepSizeOf};
 use proptest::prelude::*;
-use weighted_cache::{Cache, CacheKey, DeepSizeOf};
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
 struct TestKey(u64, u64); // (id, weight)
@@ -7,12 +7,12 @@ struct TestKey(u64, u64); // (id, weight)
 impl CacheKey for TestKey {
 	type Value = TestValue;
 
-	fn policy(&self) -> weighted_cache::CachePolicy {
+	fn policy(&self) -> priority_lfu::CachePolicy {
 		// Map the u64 weight to a policy for property testing
 		match self.1 % 3 {
-			0 => weighted_cache::CachePolicy::Critical,
-			1 => weighted_cache::CachePolicy::Standard,
-			_ => weighted_cache::CachePolicy::Volatile,
+			0 => priority_lfu::CachePolicy::Critical,
+			1 => priority_lfu::CachePolicy::Standard,
+			_ => priority_lfu::CachePolicy::Volatile,
 		}
 	}
 }

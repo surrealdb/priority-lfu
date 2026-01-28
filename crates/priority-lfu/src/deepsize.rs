@@ -6,7 +6,7 @@
 //! the `DeepSizeOf` derive macro from [`deepsize_derive`](https://docs.rs/deepsize_derive)
 //!
 //! ```rust
-//! use weighted_cache::DeepSizeOf;
+//! use priority_lfu::DeepSizeOf;
 //!
 //! #[derive(DeepSizeOf)]
 //! struct Test {
@@ -33,8 +33,8 @@
 extern crate alloc;
 extern crate core;
 
-extern crate self as weighted_cache_derive;
-// pub use weighted_cache_derive::*;
+extern crate self as priority_lfu_derive;
+// pub use priority_lfu_derive::*;
 
 use core::mem::{size_of, size_of_val};
 
@@ -58,7 +58,7 @@ pub trait DeepSizeOf {
 	/// doesn't account for allocator's overhead.
 	///
 	/// ```rust
-	/// use weighted_cache::DeepSizeOf;
+	/// use priority_lfu::DeepSizeOf;
 	///
 	/// let mut map: Vec<(Box<u32>, String)> = Vec::new();
 	///
@@ -109,7 +109,7 @@ pub trait DeepSizeOf {
 	///
 	/// Here is an example from the implementation of `DeepSizeOf` for `Vec<T>`
 	/// ```rust, ignore
-	/// # use weighted_cache_derive::{DeepSizeOf, Context};
+	/// # use priority_lfu_derive::{DeepSizeOf, Context};
 	/// impl<T> DeepSizeOf for std::vec::Vec<T> where T: DeepSizeOf {
 	///     fn deep_size_of_children(&self, context: &mut Context) -> usize {
 	///         // Size of heap allocations for each child
@@ -186,7 +186,7 @@ where
 	/// the unused capacity.
 	///
 	/// ```rust
-	/// use weighted_cache::DeepSizeOf;
+	/// use priority_lfu::DeepSizeOf;
 	///
 	/// let mut vec: Vec<u8> = vec![];
 	/// for i in 0..13 {
@@ -198,7 +198,7 @@ where
 	/// ```
 	/// With allocated objects:
 	/// ```rust
-	/// use weighted_cache::DeepSizeOf;
+	/// use priority_lfu::DeepSizeOf;
 	///
 	/// let mut vec: Vec<Box<u64>> = vec![];
 	/// for i in 0..13 {
@@ -224,7 +224,7 @@ where
 	/// the unused capacity.
 	///
 	/// ```rust
-	/// use weighted_cache::DeepSizeOf;
+	/// use priority_lfu::DeepSizeOf;
 	/// use std::collections::VecDeque;
 	///
 	/// let mut vec: VecDeque<u8> = VecDeque::new();
@@ -238,7 +238,7 @@ where
 	/// ```
 	/// With allocated objects:
 	/// ```rust
-	/// use weighted_cache::DeepSizeOf;
+	/// use priority_lfu::DeepSizeOf;
 	/// use std::collections::VecDeque;
 	///
 	/// let mut vec: VecDeque<Box<u64>> = VecDeque::new();
@@ -266,7 +266,7 @@ where
 	/// each node is 2 usize (next, prev)
 	///
 	/// ```rust
-	/// use weighted_cache::DeepSizeOf;
+	/// use priority_lfu::DeepSizeOf;
 	/// use std::collections::LinkedList;
 	///
 	/// let mut list: LinkedList<u8> = LinkedList::new();

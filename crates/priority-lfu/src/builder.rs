@@ -5,7 +5,7 @@ use crate::cache::Cache;
 /// # Example
 ///
 /// ```
-/// use weighted_cache::CacheBuilder;
+/// use priority_lfu::CacheBuilder;
 ///
 /// let cache = CacheBuilder::new(1024 * 1024 * 512) // 512 MB
 ///     .shards(128)

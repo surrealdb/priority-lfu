@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 /// Tests for async usage patterns.
-use weighted_cache::{Cache, CacheKey, DeepSizeOf};
+use priority_lfu::{Cache, CacheKey, DeepSizeOf};
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
 struct AsyncKey(u64);
@@ -9,8 +9,8 @@ struct AsyncKey(u64);
 impl CacheKey for AsyncKey {
 	type Value = AsyncValue;
 
-	fn policy(&self) -> weighted_cache::CachePolicy {
-		weighted_cache::CachePolicy::Standard
+	fn policy(&self) -> priority_lfu::CachePolicy {
+		priority_lfu::CachePolicy::Standard
 	}
 }
 

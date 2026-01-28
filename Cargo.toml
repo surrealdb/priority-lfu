@@ -6,13 +6,13 @@ members = ["crates/*"]
 version = "0.1.0"
 edition = "2024"
 authors = ["Stu Schwartz <stu.schwartz@surrealdb.com>"]
-repository = "https://github.com/surrealdb/weighted-cache"
-homepage = "https://github.com/surrealdb/weighted-cache"
+repository = "https://github.com/surrealdb/priority-lfu"
+homepage = "https://github.com/surrealdb/priority-lfu"
 license = "Apache-2.0"
 
 [workspace.dependencies]
-weighted-cache = { path = "crates/weighted-cache" }
-weighted-cache-derive = { path = "crates/weighted-cache-derive" }
+priority-lfu = { path = "crates/priority-lfu" }
+priority-lfu-derive = { path = "crates/priority-lfu-derive" }
 
 parking_lot = "0.12"
 crossbeam-queue = "0.3"

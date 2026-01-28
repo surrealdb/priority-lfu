@@ -6,7 +6,7 @@ use crate::deepsize::{Context, DeepSizeOf};
 ///
 /// Usage:
 /// ```rust
-/// use weighted_cache::known_deep_size;
+/// use priority_lfu::known_deep_size;
 ///
 /// struct A(u32);
 /// struct B(A, char);

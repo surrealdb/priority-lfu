@@ -1,13 +1,13 @@
 [package]
-name = "weighted-cache-derive"
+name = "priority-lfu-derive"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
 license.workspace = true
-description = "Derive macros for the weighted-cache crate."
-documentation = "https://docs.rs/weighted-cache-derive/"
+description = "Derive macros for the priority-lfu crate."
+documentation = "https://docs.rs/priority-lfu-derive/"
 keywords = ["cache", "weighted", "derive", "macro"]
 categories = ["caching"]
 

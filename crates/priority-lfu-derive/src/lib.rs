@@ -1,4 +1,4 @@
-//! A basic [`DeepSizeOf`](weighted_cache::DeepSizeOf) Derive implementation
+//! A basic [`DeepSizeOf`](priority_lfu::DeepSizeOf) Derive implementation
 //!
 //! Mainly from `syn`'s [`heap_size` derive example][heap_size]
 //!
@@ -13,24 +13,24 @@ use syn::{
 	Data, DeriveInput, Fields, GenericParam, Generics, Index, parse_macro_input, parse_quote,
 };
 
-/// Returns the path to the weighted_cache crate.
-/// Uses `crate` when compiling the weighted-cache library itself, otherwise `::weighted_cache`.
+/// Returns the path to the priority_lfu crate.
+/// Uses `crate` when compiling the priority-lfu library itself, otherwise `::priority_lfu`.
 fn crate_path() -> TokenStream {
 	// CARGO_CRATE_NAME gives the actual crate being compiled (with hyphens as underscores).
-	// For src/lib.rs of weighted-cache: CARGO_CRATE_NAME=weighted_cache
+	// For src/lib.rs of priority-lfu: CARGO_CRATE_NAME=priority_lfu
 	// For tests/examples: CARGO_CRATE_NAME=integration_tests, etc.
-	// For doctests: CARGO_CRATE_NAME=weighted_cache BUT we need to use external path.
+	// For doctests: CARGO_CRATE_NAME=priority_lfu BUT we need to use external path.
 	//
 	// Detect doctests via UNSTABLE_RUSTDOC_TEST_PATH which rustdoc sets for doctest compilation.
-	let is_weighted_cache_lib =
-		std::env::var("CARGO_CRATE_NAME").is_ok_and(|name| name == "weighted_cache");
+	let is_priority_lfu_lib =
+		std::env::var("CARGO_CRATE_NAME").is_ok_and(|name| name == "priority_lfu");
 	let is_doctest = std::env::var_os("UNSTABLE_RUSTDOC_TEST_PATH").is_some()
 		|| std::env::var_os("RUSTDOC").is_some();
 
-	if is_weighted_cache_lib && !is_doctest {
+	if is_priority_lfu_lib && !is_doctest {
 		quote!(crate)
 	} else {
-		quote!(::weighted_cache)
+		quote!(::priority_lfu)
 	}
 }
 

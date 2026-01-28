@@ -1,4 +1,4 @@
-# Weighted Cache
+# Priority LFU Cache
 
 A high-performance, concurrent, in-memory cache with **weight-stratified clock** eviction policy and **policy-based** prioritization.
 
@@ -18,13 +18,13 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-weighted-cache = "0.1"
+priority-lfu = "0.1"
 ```
 
 Basic usage:
 
 ```rust
-use weighted_cache::{Cache, CacheKey, CachePolicy, DeepSizeOf};
+use priority_lfu::{Cache, CacheKey, CachePolicy, DeepSizeOf};
 
 // Define your key type
 #[derive(Hash, Eq, PartialEq, Clone)]
@@ -91,7 +91,7 @@ async fn process_user(cache: Arc<Cache>, user_id: UserId) {
 **⚠️ Warning**: Don't hold `Guard` across `.await` points:
 
 ```rust,ignore
-# let cache = weighted_cache::Cache::new(1024 * 1024);
+# let cache = priority_lfu::Cache::new(1024 * 1024);
 // ❌ BAD: Guard holds a lock
 let guard = cache.get(&key).unwrap();
 some_async_fn().await; // Will fail to compile in Send context
@@ -109,7 +109,7 @@ some_async_fn().await;
 Use `CacheBuilder` for custom settings:
 
 ```rust,ignore
-use weighted_cache::CacheBuilder;
+use priority_lfu::CacheBuilder;
 
 let cache = CacheBuilder::new(1024 * 1024 * 512) // 512 MB
     .shards(128)                // More shards = less contention
@@ -124,13 +124,13 @@ The cache provides comprehensive performance metrics for monitoring and debuggin
 
 ```toml
 [dependencies]
-weighted-cache = { version = "0.1", features = ["metrics"] }
+priority-lfu = { version = "0.1", features = ["metrics"] }
 ```
 
 Example usage:
 
 ```rust,ignore
-use weighted_cache::Cache;
+use priority_lfu::Cache;
 
 let cache = Cache::new(1024 * 1024);
 
@@ -300,7 +300,7 @@ The cache is `Send + Sync` and can be shared via `Arc`:
 
 ```rust,ignore
 use std::sync::Arc;
-use weighted_cache::Cache;
+use priority_lfu::Cache;
 
 let cache = Arc::new(Cache::new(1024 * 1024));
 

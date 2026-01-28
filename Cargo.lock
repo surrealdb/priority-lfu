@@ -808,6 +808,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "priority-lfu"
+version = "0.1.0"
+dependencies = [
+ "ahash 0.8.12",
+ "arrayvec",
+ "bytes",
+ "chrono",
+ "criterion",
+ "geo",
+ "hashbrown 0.16.1",
+ "indexmap",
+ "parking_lot",
+ "priority-lfu-derive",
+ "proptest",
+ "quick_cache",
+ "regex",
+ "rust_decimal",
+ "slab",
+ "slotmap",
+ "smallvec",
+ "tokio",
+ "trybuild",
+ "uuid",
+]
+
+[[package]]
+name = "priority-lfu-derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.114",
+]
+
+[[package]]
 name = "proc-macro-crate"
 version = "3.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1544,41 +1579,6 @@ checksum = "312e32e551d92129218ea9a2452120f4aabc03529ef03e4d0d82fb2780608598"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "weighted-cache"
-version = "0.1.0"
-dependencies = [
- "ahash 0.8.12",
- "arrayvec",
- "bytes",
- "chrono",
- "criterion",
- "geo",
- "hashbrown 0.16.1",
- "indexmap",
- "parking_lot",
- "proptest",
- "quick_cache",
- "regex",
- "rust_decimal",
- "slab",
- "slotmap",
- "smallvec",
- "tokio",
- "trybuild",
- "uuid",
- "weighted-cache-derive",
-]
-
-[[package]]
-name = "weighted-cache-derive"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.114",
 ]
 
 [[package]]

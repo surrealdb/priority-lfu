@@ -355,7 +355,7 @@ impl Cache {
 	/// # Example
 	///
 	/// ```
-	/// use weighted_cache::Cache;
+	/// use priority_lfu::Cache;
 	///
 	/// let cache = Cache::new(1024 * 1024);
 	/// // ... perform cache operations ...

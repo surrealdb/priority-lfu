@@ -2,8 +2,8 @@ use std::hint::black_box;
 use std::sync::Arc;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use priority_lfu::{Cache, CacheKey, CachePolicy, DeepSizeOf};
 use quick_cache::sync::Cache as QuickCache;
-use weighted_cache::{Cache, CacheKey, CachePolicy, DeepSizeOf};
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
 struct BenchKey(u64);
@@ -220,7 +220,7 @@ fn bench_hit_rate_zipf(c: &mut Criterion) {
 }
 
 // ============================================================================
-// Comparison Benchmarks: weighted-cache vs quick_cache
+// Comparison Benchmarks: priority-lfu vs quick_cache
 // ============================================================================
 
 fn bench_comparison_insert(c: &mut Criterion) {
@@ -232,7 +232,7 @@ fn bench_comparison_insert(c: &mut Criterion) {
 	for size in [100, 1000, 10000] {
 		group.throughput(Throughput::Elements(size));
 
-		group.bench_with_input(BenchmarkId::new("weighted_cache", size), &size, |b, &size| {
+		group.bench_with_input(BenchmarkId::new("priority_lfu", size), &size, |b, &size| {
 			b.iter(|| {
 				// Estimate ~100 bytes per entry (64 byte value + key + Arc overhead)
 				let cache = Cache::new(CACHE_CAPACITY * 100);
@@ -268,10 +268,10 @@ fn bench_comparison_get_hit(c: &mut Criterion) {
 	const NUM_ITEMS: u64 = 1000;
 	const CACHE_CAPACITY: usize = 2000;
 
-	// weighted-cache setup (~100 bytes per entry)
-	let weighted_cache = Arc::new(Cache::new(CACHE_CAPACITY * 100));
+	// priority-lfu setup (~100 bytes per entry)
+	let lfu_cache = Arc::new(Cache::new(CACHE_CAPACITY * 100));
 	for i in 0..NUM_ITEMS {
-		weighted_cache.insert(
+		lfu_cache.insert(
 			BenchKey(i),
 			BenchValue {
 				data: vec![0u8; 64],
@@ -285,11 +285,11 @@ fn bench_comparison_get_hit(c: &mut Criterion) {
 		quick_cache.insert(i, vec![0u8; 64]);
 	}
 
-	group.bench_function("weighted_cache", |b| {
+	group.bench_function("priority_lfu", |b| {
 		b.iter(|| {
 			for i in 0..NUM_ITEMS {
 				let key = BenchKey(black_box(i));
-				black_box(weighted_cache.get(&key));
+				black_box(lfu_cache.get(&key));
 			}
 		});
 	});
@@ -312,10 +312,10 @@ fn bench_comparison_mixed_workload(c: &mut Criterion) {
 	const NUM_ITEMS: u64 = 500;
 	const CACHE_CAPACITY: usize = 1000;
 
-	// weighted-cache setup (~100 bytes per entry)
-	let weighted_cache = Arc::new(Cache::new(CACHE_CAPACITY * 100));
+	// priority-lfu setup (~100 bytes per entry)
+	let lfu_cache = Arc::new(Cache::new(CACHE_CAPACITY * 100));
 	for i in 0..NUM_ITEMS {
-		weighted_cache.insert(
+		lfu_cache.insert(
 			BenchKey(i),
 			BenchValue {
 				data: vec![0u8; 64],
@@ -329,12 +329,12 @@ fn bench_comparison_mixed_workload(c: &mut Criterion) {
 		quick_cache.insert(i, vec![0u8; 64]);
 	}
 
-	group.bench_function("weighted_cache", |b| {
+	group.bench_function("priority_lfu", |b| {
 		b.iter(|| {
 			for i in 0..100u64 {
 				if i % 5 == 0 {
 					// 20% writes
-					weighted_cache.insert(
+					lfu_cache.insert(
 						BenchKey(black_box(i)),
 						BenchValue {
 							data: vec![0u8; 64],
@@ -342,7 +342,7 @@ fn bench_comparison_mixed_workload(c: &mut Criterion) {
 					);
 				} else {
 					// 80% reads
-					black_box(weighted_cache.get(&BenchKey(black_box(i % NUM_ITEMS))));
+					black_box(lfu_cache.get(&BenchKey(black_box(i % NUM_ITEMS))));
 				}
 			}
 		});
@@ -374,10 +374,10 @@ fn bench_comparison_concurrent_reads(c: &mut Criterion) {
 	const NUM_ITEMS: u64 = 1000;
 	const CACHE_CAPACITY: usize = 2000;
 
-	// weighted-cache setup (~100 bytes per entry)
-	let weighted_cache = Arc::new(Cache::new(CACHE_CAPACITY * 100));
+	// priority-lfu setup (~100 bytes per entry)
+	let lfu_cache = Arc::new(Cache::new(CACHE_CAPACITY * 100));
 	for i in 0..NUM_ITEMS {
-		weighted_cache.insert(
+		lfu_cache.insert(
 			BenchKey(i),
 			BenchValue {
 				data: vec![0u8; 64],
@@ -391,12 +391,12 @@ fn bench_comparison_concurrent_reads(c: &mut Criterion) {
 		quick_cache.insert(i, vec![0u8; 64]);
 	}
 
-	group.bench_function("weighted_cache", |b| {
+	group.bench_function("priority_lfu", |b| {
 		b.iter(|| {
 			let mut handles = vec![];
 
 			for _ in 0..4 {
-				let cache = weighted_cache.clone();
+				let cache = lfu_cache.clone();
 				handles.push(thread::spawn(move || {
 					for i in 0..250u64 {
 						black_box(cache.get(&BenchKey(black_box(i))));
@@ -439,7 +439,7 @@ fn bench_comparison_eviction_pressure(c: &mut Criterion) {
 	// Both caches should hold ~100 items before eviction starts
 	const CACHE_CAPACITY: usize = 100;
 
-	group.bench_function("weighted_cache", |b| {
+	group.bench_function("priority_lfu", |b| {
 		b.iter(|| {
 			// ~150 bytes per entry (100 byte value + key + Arc overhead)
 			let cache = Cache::new(CACHE_CAPACITY * 150);
@@ -484,22 +484,22 @@ fn bench_comparison_zipf_distribution(c: &mut Criterion) {
 		})
 		.collect();
 
-	// weighted-cache setup (~100 bytes per entry)
-	let weighted_cache = Arc::new(Cache::new(CACHE_CAPACITY * 100));
+	// priority-lfu setup (~100 bytes per entry)
+	let lfu_cache = Arc::new(Cache::new(CACHE_CAPACITY * 100));
 
 	// quick_cache setup
 	let quick_cache = Arc::new(QuickCache::new(CACHE_CAPACITY));
 
-	group.bench_function("weighted_cache", |b| {
+	group.bench_function("priority_lfu", |b| {
 		b.iter(|| {
 			for &key_id in &zipf_keys {
 				let key = BenchKey(black_box(key_id));
-				match weighted_cache.get(&key) {
+				match lfu_cache.get(&key) {
 					Some(val) => {
 						black_box(val);
 					}
 					None => {
-						weighted_cache.insert(
+						lfu_cache.insert(
 							key,
 							BenchValue {
 								data: vec![0u8; 64],

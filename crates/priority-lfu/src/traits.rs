@@ -1,6 +1,6 @@
 use std::hash::Hash;
 
-use weighted_cache_derive::DeepSizeOf;
+use priority_lfu_derive::DeepSizeOf;
 
 use crate::deepsize::DeepSizeOf;
 
@@ -31,7 +31,7 @@ pub enum CachePolicy {
 /// # Example
 ///
 /// ```
-/// use weighted_cache::{DeepSizeOf, CacheKey, CachePolicy};
+/// use priority_lfu::{DeepSizeOf, CacheKey, CachePolicy};
 ///
 /// #[derive(Hash, Eq, PartialEq, Clone)]
 /// struct UserId(u64);

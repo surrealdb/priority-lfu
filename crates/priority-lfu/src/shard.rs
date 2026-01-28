@@ -156,7 +156,7 @@ impl Shard {
 	/// * `size_capacity` - Total size capacity for this shard (in bytes)
 	pub fn new(size_capacity: usize) -> Self {
 		Self {
-			entries: HashMap::with_hasher(PassthroughBuildHasher::default()),
+			entries: HashMap::with_hasher(PassthroughBuildHasher),
 			buckets: [
 				PolicyBucket::new(), // Critical
 				PolicyBucket::new(), // Standard

@@ -8,7 +8,7 @@
 /// # Example
 ///
 /// ```
-/// use weighted_cache::Cache;
+/// use priority_lfu::Cache;
 ///
 /// let cache = Cache::new(1024 * 1024);
 /// // ... perform cache operations ...
@@ -49,7 +49,7 @@ impl CacheMetrics {
 	/// # Example
 	///
 	/// ```
-	/// # use weighted_cache::Cache;
+	/// # use priority_lfu::Cache;
 	/// # let cache = Cache::new(1024);
 	/// let metrics = cache.metrics();
 	/// let hit_rate = metrics.hit_rate();
@@ -73,7 +73,7 @@ impl CacheMetrics {
 	/// # Example
 	///
 	/// ```
-	/// # use weighted_cache::Cache;
+	/// # use priority_lfu::Cache;
 	/// # let cache = Cache::new(1024);
 	/// let metrics = cache.metrics();
 	/// let utilization = metrics.utilization();
@@ -94,7 +94,7 @@ impl CacheMetrics {
 	/// # Example
 	///
 	/// ```
-	/// # use weighted_cache::Cache;
+	/// # use priority_lfu::Cache;
 	/// # let cache = Cache::new(1024);
 	/// let metrics = cache.metrics();
 	/// println!("Total accesses: {}", metrics.total_accesses());
@@ -108,7 +108,7 @@ impl CacheMetrics {
 	/// # Example
 	///
 	/// ```
-	/// # use weighted_cache::Cache;
+	/// # use priority_lfu::Cache;
 	/// # let cache = Cache::new(1024);
 	/// let metrics = cache.metrics();
 	/// println!("Total writes: {}", metrics.total_writes());

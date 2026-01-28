@@ -1,5 +1,5 @@
 [package]
-name = "weighted-cache"
+name = "priority-lfu"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -7,8 +7,8 @@ repository.workspace = true
 homepage.workspace = true
 license.workspace = true
 description = "A high-performance, concurrent, in-memory cache with W-TinyLFU eviction policy and weight-based prioritization."
-documentation = "https://docs.rs/weighted-cache/"
-keywords = ["cache", "weighted", "tinylfu", "lfu", "eviction", "priority"]
+documentation = "https://docs.rs/priority-lfu/"
+keywords = ["cache", "weighted", "priority", "lfu", "eviction"]
 categories = ["caching"]
 
 [features]
@@ -20,7 +20,7 @@ parking_lot.workspace = true
 indexmap.workspace = true
 ahash.workspace = true
 hashbrown = "^0.16"
-weighted-cache-derive.workspace = true
+priority-lfu-derive.workspace = true
 
 slotmap = { version = "^1", optional = true }
 slab = { version = "^0.4", optional = true }

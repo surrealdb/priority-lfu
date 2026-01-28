@@ -1,4 +1,4 @@
-use weighted_cache::{Cache, CacheKey, CachePolicy, DeepSizeOf};
+use priority_lfu::{Cache, CacheKey, CachePolicy, DeepSizeOf};
 
 /// Example demonstrating how different keys can have different eviction policies
 /// for the same value type.
