@@ -9,7 +9,7 @@ mod slotmap_impl {
 	impl<K, V> DeepSizeOf for slotmap::SlotMap<K, V>
 	where
 		K: DeepSizeOf + slotmap::Key,
-		V: DeepSizeOf + slotmap::Slottable,
+		V: DeepSizeOf,
 	{
 		fn deep_size_of_children(&self, context: &mut Context) -> usize {
 			self.iter().fold(0, |sum, (key, val)| {
@@ -46,19 +46,19 @@ mod slab_impl {
 
 #[cfg(feature = "arrayvec")]
 mod arrayvec_impl {
-	use crate::{Context, DeepSizeOf, known_deep_size};
+	use crate::{Context, DeepSizeOf};
 
-	impl<A> DeepSizeOf for arrayvec::ArrayVec<A>
-	where
-		A: arrayvec::Array,
-		<A as arrayvec::Array>::Item: DeepSizeOf,
-	{
+	impl<T: DeepSizeOf, const CAP: usize> DeepSizeOf for arrayvec::ArrayVec<T, CAP> {
 		fn deep_size_of_children(&self, context: &mut Context) -> usize {
 			self.iter().fold(0, |sum, elem| sum + elem.deep_size_of_children(context))
 		}
 	}
 
-	known_deep_size!(0; { A: arrayvec::Array<Item=u8> + Copy } arrayvec::ArrayString<A>);
+	impl<const CAP: usize> DeepSizeOf for arrayvec::ArrayString<CAP> {
+		fn deep_size_of_children(&self, _context: &mut Context) -> usize {
+			0
+		}
+	}
 }
 
 #[cfg(feature = "smallvec")]

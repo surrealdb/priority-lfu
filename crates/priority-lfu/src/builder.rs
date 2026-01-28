@@ -11,6 +11,19 @@ use crate::cache::Cache;
 ///     .shards(128)
 ///     .build();
 /// ```
+///
+/// # Automatic Shard Scaling
+///
+/// By default, the cache uses up to 64 shards, but automatically scales down
+/// for smaller caches to ensure each shard has at least 4KB capacity. This
+/// prevents premature eviction due to uneven hash distribution.
+///
+/// - 256KB+ capacity: 64 shards (4KB+ per shard)
+/// - 64KB capacity: 16 shards (4KB per shard)
+/// - 4KB capacity: 1 shard (4KB per shard)
+///
+/// You can override this with [`shards()`], but the count may still be reduced
+/// if the capacity is too small to support the requested number.
 pub struct CacheBuilder {
 	max_size: usize,
 	shard_count: Option<usize>,
@@ -30,7 +43,11 @@ impl CacheBuilder {
 	/// More shards reduce contention but increase memory overhead.
 	/// Will be rounded up to the next power of 2.
 	///
-	/// Default: 64 shards
+	/// **Note**: The shard count may be reduced if the capacity is too small to
+	/// support the requested number of shards (minimum 4KB per shard). This prevents
+	/// premature eviction due to uneven hash distribution.
+	///
+	/// Default: up to 64 shards, scaled based on capacity
 	pub fn shards(mut self, count: usize) -> Self {
 		self.shard_count = Some(count);
 		self
@@ -38,8 +55,10 @@ impl CacheBuilder {
 
 	/// Build the cache with the configured settings.
 	pub fn build(self) -> Cache {
-		let shard_count = self.shard_count.unwrap_or(64);
-		Cache::with_shards(self.max_size, shard_count)
+		match self.shard_count {
+			Some(count) => Cache::with_shards(self.max_size, count),
+			None => Cache::new(self.max_size),
+		}
 	}
 }
 

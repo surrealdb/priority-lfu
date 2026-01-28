@@ -39,9 +39,15 @@ use crate::traits::CacheKey;
 ///
 /// # Sharding for Concurrency
 ///
-/// The cache divides its capacity across multiple shards (default: 64). Each shard has its
-/// own lock, reducing contention in concurrent workloads. Keys are distributed to shards
-/// via their hash value.
+/// The cache divides its capacity across multiple shards (up to 64 by default). Each shard
+/// has its own lock, reducing contention in concurrent workloads. Keys are distributed to
+/// shards via their hash value.
+///
+/// The shard count is automatically scaled based on capacity to ensure each shard has at
+/// least 4KB of space. This prevents premature eviction due to uneven hash distribution:
+///
+/// - Large caches (>= 256KB): 64 shards
+/// - Smaller caches: Scaled down proportionally (e.g., 64KB → 16 shards, 4KB → 1 shard)
 ///
 /// # Async Usage
 ///
@@ -89,22 +95,62 @@ pub struct Cache {
 	removals: AtomicU64,
 }
 
+/// Minimum size per shard in bytes.
+///
+/// This ensures each shard has enough capacity to hold a reasonable number of entries,
+/// preventing premature eviction due to hash distribution variance across shards.
+/// With 4KB minimum, a shard can comfortably hold dozens of typical cache entries.
+const MIN_SHARD_SIZE: usize = 4096;
+
+/// Default number of shards for large caches.
+///
+/// More shards reduce contention but increase memory overhead.
+/// This value is used when capacity is large enough to support it.
+const DEFAULT_SHARD_COUNT: usize = 64;
+
+/// Compute the optimal shard count for a given capacity.
+///
+/// This ensures each shard has at least `MIN_SHARD_SIZE` bytes to prevent
+/// premature eviction due to uneven hash distribution.
+fn compute_shard_count(capacity: usize, desired_shards: usize) -> usize {
+	// Calculate max shards that maintain MIN_SHARD_SIZE per shard
+	let max_shards = (capacity / MIN_SHARD_SIZE).max(1);
+
+	// Use the smaller of desired and max, ensuring power of 2
+	desired_shards.min(max_shards).next_power_of_two().max(1)
+}
+
 impl Cache {
 	/// Create a new cache with the given maximum size in bytes.
 	///
-	/// Uses default configuration: 64 shards, 90% hot target.
+	/// Uses default configuration with automatic shard scaling. The number of shards
+	/// is chosen to balance concurrency (more shards = less contention) with per-shard
+	/// capacity (each shard needs enough space to avoid premature eviction).
+	///
+	/// - Large caches (>= 256KB): 64 shards
+	/// - Smaller caches: Scaled down to ensure at least 4KB per shard
+	///
+	/// For explicit control over shard count, use [`CacheBuilder`] or [`with_shards`].
 	pub fn new(max_size_bytes: usize) -> Self {
-		Self::with_shards(max_size_bytes, 64)
+		let shard_count = compute_shard_count(max_size_bytes, DEFAULT_SHARD_COUNT);
+		Self::with_shards_internal(max_size_bytes, shard_count)
 	}
 
 	/// Create with custom shard count.
 	///
 	/// More shards reduce contention but increase memory overhead.
 	/// Recommended: `num_cpus * 8` to `num_cpus * 16`.
+	///
+	/// **Note**: The shard count may be reduced if the capacity is too small to
+	/// support the requested number of shards (minimum 4KB per shard). This prevents
+	/// premature eviction due to uneven hash distribution.
 	pub fn with_shards(max_size_bytes: usize, shard_count: usize) -> Self {
-		// Ensure shard_count is a power of 2 for efficient masking
-		let shard_count = shard_count.next_power_of_two().max(4);
+		let shard_count = compute_shard_count(max_size_bytes, shard_count);
+		Self::with_shards_internal(max_size_bytes, shard_count)
+	}
 
+	/// Internal constructor that uses the shard count directly (already validated).
+	fn with_shards_internal(max_size_bytes: usize, shard_count: usize) -> Self {
 		// Divide capacity per shard
 		let size_per_shard = max_size_bytes / shard_count;
 
@@ -406,6 +452,30 @@ mod tests {
 	#[derive(Clone, Debug, PartialEq, DeepSizeOf)]
 	struct TestValue {
 		data: String,
+	}
+
+	#[test]
+	fn test_compute_shard_count_scales_with_capacity() {
+		// Very small capacity: should get 1 shard
+		assert_eq!(compute_shard_count(1024, 64), 1);
+		assert_eq!(compute_shard_count(4095, 64), 1);
+
+		// Exactly MIN_SHARD_SIZE: 1 shard
+		assert_eq!(compute_shard_count(4096, 64), 1);
+
+		// 2x MIN_SHARD_SIZE: 2 shards (power of 2)
+		assert_eq!(compute_shard_count(8192, 64), 2);
+
+		// 16x MIN_SHARD_SIZE: 16 shards
+		assert_eq!(compute_shard_count(65536, 64), 16);
+
+		// Large capacity: full 64 shards
+		assert_eq!(compute_shard_count(256 * 1024, 64), 64);
+		assert_eq!(compute_shard_count(1024 * 1024, 64), 64);
+
+		// Custom shard count is also bounded
+		assert_eq!(compute_shard_count(8192, 128), 2); // Can't have 128 shards with 8KB
+		assert_eq!(compute_shard_count(1024 * 1024, 128), 128); // Large cache can have 128
 	}
 
 	#[test]
