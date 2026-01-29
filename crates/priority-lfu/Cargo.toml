@@ -11,6 +11,9 @@ documentation = "https://docs.rs/priority-lfu/"
 keywords = ["cache", "weighted", "priority", "lfu", "eviction"]
 categories = ["caching"]
 
+[lib]
+bench = false
+
 [features]
 default = ["bytes", "chrono", "geo", "uuid", "regex", "rust_decimal"]
 metrics = []
