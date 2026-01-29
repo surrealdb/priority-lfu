@@ -11,8 +11,8 @@ homepage = "https://github.com/surrealdb/priority-lfu"
 license = "Apache-2.0"
 
 [workspace.dependencies]
-priority-lfu = { path = "crates/priority-lfu" }
-priority-lfu-derive = { path = "crates/priority-lfu-derive" }
+priority-lfu = { path = "crates/priority-lfu", version = "0.1.0" }
+priority-lfu-derive = { path = "crates/priority-lfu-derive", version = "0.1.0" }
 
 # Core dependencies
 parking_lot = "0.12"
