@@ -337,6 +337,10 @@ cargo bench
 
 This project is licensed under the MIT License.
 
+## Contributing
+
+For maintainers releasing new versions, see [RELEASE.md](RELEASE.md) for the release process.
+
 ## Design
 
 For detailed design documentation, see [design/spec.md](design/spec.md).
