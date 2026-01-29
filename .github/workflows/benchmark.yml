@@ -1,45 +1,25 @@
-name: Benchmarks
+name: Benchmark Pull Requests
 
 on:
-  push:
-    branches:
-      - main
   pull_request:
     branches:
       - main
-
-permissions:
-  contents: write
-  deployments: write
 
 jobs:
   benchmark:
     name: Run benchmarks
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
+      
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-
+      
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
-
-      - name: Run benchmarks
-        run: cargo bench | tee output.txt
-
-      - name: Store benchmark result
-        uses: benchmark-action/github-action-benchmark@v1
-        if: github.event_name != 'pull_request'
+      
+      - name: Run benchmark comparison
+        uses: boa-dev/criterion-compare-action@v3
         with:
-          name: priority-lfu Rust Benchmark
-          tool: 'cargo'
-          output-file-path: output.txt
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          auto-push: true
-          gh-pages-branch: gh-pages
-          benchmark-data-dir-path: dev/bench
-          alert-threshold: '200%'
-          comment-on-alert: true
-          fail-on-alert: true
+          branchName: ${{ github.base_ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
