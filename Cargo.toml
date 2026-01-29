@@ -14,19 +14,36 @@ license = "Apache-2.0"
 priority-lfu = { path = "crates/priority-lfu" }
 priority-lfu-derive = { path = "crates/priority-lfu-derive" }
 
+# Core dependencies
 parking_lot = "0.12"
 crossbeam-queue = "0.3"
 indexmap = "2"
 ahash = "0.8"
+hashbrown = "0.16"
+
+# Proc macro dependencies
 proc-macro2 = "1"
 quote = "1"
 syn = "2"
 
-# dev dependencies
+# Optional dependencies
+slotmap = "1"
+slab = "0.4"
+arrayvec = "0.7"
+smallvec = "1"
+chrono = "0.4"
+uuid = "1.12"
+geo = "0.32"
+regex = "1"
+rust_decimal = "1"
+bytes = "1"
+
+# Dev dependencies
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 criterion = "0.8"
 proptest = "1"
 trybuild = "1"
+quick_cache = "0.6"
 
 [workspace.lints.clippy]
 

@@ -27,17 +27,19 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run benchmarks
-        run: cargo bench -- --output-format bencher | tee output.txt
+        run: cargo bench | tee output.txt
 
       - name: Store benchmark result
         uses: benchmark-action/github-action-benchmark@v1
         if: github.event_name != 'pull_request'
         with:
-          name: Criterion.rs Benchmark
+          name: priority-lfu Rust Benchmark
           tool: 'cargo'
           output-file-path: output.txt
           github-token: ${{ secrets.GITHUB_TOKEN }}
           auto-push: true
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: dev/bench
           alert-threshold: '200%'
           comment-on-alert: true
           fail-on-alert: true

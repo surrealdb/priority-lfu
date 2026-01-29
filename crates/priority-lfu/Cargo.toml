@@ -19,26 +19,26 @@ metrics = []
 parking_lot.workspace = true
 indexmap.workspace = true
 ahash.workspace = true
-hashbrown = "^0.16"
+hashbrown.workspace = true
 priority-lfu-derive.workspace = true
 
-slotmap = { version = "^1", optional = true }
-slab = { version = "^0.4", optional = true }
-arrayvec = { version = "^0.7", optional = true }
-smallvec = { version = "^1", optional = true }
-chrono = { version = "^0.4", optional = true }
-uuid = { version = "^1.12", optional = true }
-geo = { version = "^0.32", optional = true }
-regex = { version = "^1", optional = true }
-rust_decimal = { version = "^1", optional = true }
-bytes = { version = "^1", optional = true }
+slotmap = { workspace = true, optional = true }
+slab = { workspace = true, optional = true }
+arrayvec = { workspace = true, optional = true }
+smallvec = { workspace = true, optional = true }
+chrono = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
+geo = { workspace = true, optional = true }
+regex = { workspace = true, optional = true }
+rust_decimal = { workspace = true, optional = true }
+bytes = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio.workspace = true
 criterion.workspace = true
 proptest.workspace = true
 trybuild.workspace = true
-quick_cache = "0.6"
+quick_cache.workspace = true
 
 [[bench]]
 name = "cache_benchmark"
