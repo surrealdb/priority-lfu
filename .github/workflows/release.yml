@@ -4,6 +4,12 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g. 0.2.0)'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -12,7 +18,7 @@ jobs:
   release:
     name: Tag and publish release
     runs-on: ubuntu-latest
-    if: startsWith(github.event.head_commit.message, 'Release v')
+    if: "${{ github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'chore(release): bump version to ') }}"
 
     steps:
       - uses: actions/checkout@v4
@@ -23,17 +29,29 @@ jobs:
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Extract version from commit message
+      - name: Determine version
         id: version
         run: |
-          COMMIT_MSG="${{ github.event.head_commit.message }}"
-          VERSION=$(echo "$COMMIT_MSG" | grep -oP 'Release v\K[0-9]+\.[0-9]+\.[0-9]+')
-          if [ -z "$VERSION" ]; then
-            echo "Error: Could not extract version from commit message"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+            echo "Using manual version: $VERSION"
+          else
+            COMMIT_MSG="${{ github.event.head_commit.message }}"
+            VERSION=$(echo "$COMMIT_MSG" | grep -oP 'bump version to \K[0-9]+\.[0-9]+\.[0-9]+')
+            if [ -z "$VERSION" ]; then
+              echo "Error: Could not extract version from commit message"
+              exit 1
+            fi
+            echo "Extracted version from commit: $VERSION"
+          fi
+          
+          # Validate version format
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Error: Version must be in format X.Y.Z"
             exit 1
           fi
+          
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Extracted version: $VERSION"
 
       - name: Create and push tag
         run: |
