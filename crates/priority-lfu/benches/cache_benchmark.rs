@@ -2,7 +2,7 @@ use std::hint::black_box;
 use std::sync::Arc;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use priority_lfu::{Cache, CacheKey, CachePolicy, DeepSizeOf};
+use priority_lfu::{Cache, CacheKey, CacheKeyLookup, CachePolicy, DeepSizeOf};
 use quick_cache::sync::Cache as QuickCache;
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
@@ -530,6 +530,288 @@ fn bench_comparison_zipf_distribution(c: &mut Criterion) {
 	group.finish();
 }
 
+// ============================================================================
+// Borrowed Key Lookup Benchmarks: Demonstrates zero-allocation lookups
+// ============================================================================
+
+// String-based key for realistic benchmarking
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+struct StringKey(String, String);
+
+impl CacheKey for StringKey {
+	type Value = BenchValue;
+
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Standard
+	}
+}
+
+// Borrowed lookup type
+struct StringKeyRef<'a>(&'a str, &'a str);
+
+impl std::hash::Hash for StringKeyRef<'_> {
+	fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+		self.0.hash(state);
+		self.1.hash(state);
+	}
+}
+
+impl CacheKeyLookup<StringKey> for StringKeyRef<'_> {
+	fn eq_key(&self, key: &StringKey) -> bool {
+		self.0 == key.0 && self.1 == key.1
+	}
+}
+
+fn bench_owned_vs_borrowed_get(c: &mut Criterion) {
+	let mut group = c.benchmark_group("borrowed_key/get");
+
+	let cache = Arc::new(Cache::new(1024 * 1024));
+
+	// Pre-populate cache with string keys
+	for i in 0..1000 {
+		cache.insert(
+			StringKey(format!("namespace_{}", i), format!("database_{}", i)),
+			BenchValue {
+				data: vec![0u8; 64],
+			},
+		);
+	}
+
+	// Benchmark: get with owned key (requires allocation)
+	group.bench_function("owned_key", |b| {
+		b.iter(|| {
+			for i in 0..1000 {
+				let ns = format!("namespace_{}", black_box(i));
+				let db = format!("database_{}", black_box(i));
+				let key = StringKey(ns, db);
+				black_box(cache.get(&key));
+			}
+		});
+	});
+
+	// Benchmark: get_by with borrowed key (zero allocation)
+	group.bench_function("borrowed_key", |b| {
+		b.iter(|| {
+			for i in 0..1000 {
+				let ns = format!("namespace_{}", black_box(i));
+				let db = format!("database_{}", black_box(i));
+				let key_ref = StringKeyRef(&ns, &db);
+				black_box(cache.get_by::<StringKey, _>(&key_ref));
+			}
+		});
+	});
+
+	group.finish();
+}
+
+fn bench_owned_vs_borrowed_get_clone(c: &mut Criterion) {
+	let mut group = c.benchmark_group("borrowed_key/get_clone");
+
+	let cache = Arc::new(Cache::new(1024 * 1024));
+
+	// Pre-populate cache with string keys
+	for i in 0..1000 {
+		cache.insert(
+			StringKey(format!("namespace_{}", i), format!("database_{}", i)),
+			BenchValue {
+				data: vec![0u8; 64],
+			},
+		);
+	}
+
+	// Benchmark: get_clone with owned key (requires allocation)
+	group.bench_function("owned_key", |b| {
+		b.iter(|| {
+			for i in 0..1000 {
+				let ns = format!("namespace_{}", black_box(i));
+				let db = format!("database_{}", black_box(i));
+				let key = StringKey(ns, db);
+				black_box(cache.get_clone(&key));
+			}
+		});
+	});
+
+	// Benchmark: get_clone_by with borrowed key (zero allocation)
+	group.bench_function("borrowed_key", |b| {
+		b.iter(|| {
+			for i in 0..1000 {
+				let ns = format!("namespace_{}", black_box(i));
+				let db = format!("database_{}", black_box(i));
+				let key_ref = StringKeyRef(&ns, &db);
+				black_box(cache.get_clone_by::<StringKey, _>(&key_ref));
+			}
+		});
+	});
+
+	group.finish();
+}
+
+fn bench_owned_vs_borrowed_contains(c: &mut Criterion) {
+	let mut group = c.benchmark_group("borrowed_key/contains");
+
+	let cache = Arc::new(Cache::new(1024 * 1024));
+
+	// Pre-populate cache with string keys
+	for i in 0..1000 {
+		cache.insert(
+			StringKey(format!("namespace_{}", i), format!("database_{}", i)),
+			BenchValue {
+				data: vec![0u8; 64],
+			},
+		);
+	}
+
+	// Benchmark: contains with owned key (requires allocation)
+	group.bench_function("owned_key", |b| {
+		b.iter(|| {
+			for i in 0..1000 {
+				let ns = format!("namespace_{}", black_box(i));
+				let db = format!("database_{}", black_box(i));
+				let key = StringKey(ns, db);
+				black_box(cache.contains(&key));
+			}
+		});
+	});
+
+	// Benchmark: contains_by with borrowed key (zero allocation)
+	group.bench_function("borrowed_key", |b| {
+		b.iter(|| {
+			for i in 0..1000 {
+				let ns = format!("namespace_{}", black_box(i));
+				let db = format!("database_{}", black_box(i));
+				let key_ref = StringKeyRef(&ns, &db);
+				black_box(cache.contains_by::<StringKey, _>(&key_ref));
+			}
+		});
+	});
+
+	group.finish();
+}
+
+fn bench_borrowed_key_realistic_workload(c: &mut Criterion) {
+	let mut group = c.benchmark_group("borrowed_key/realistic_workload");
+
+	let cache = Arc::new(Cache::new(1024 * 1024));
+
+	// Pre-populate with realistic database cache keys
+	for i in 0..500 {
+		cache.insert(
+			StringKey(format!("ns_{}", i % 10), format!("db_{}", i)),
+			BenchValue {
+				data: vec![0u8; 128],
+			},
+		);
+	}
+
+	// Benchmark: Owned key approach (allocates on every lookup)
+	group.bench_function("owned_key", |b| {
+		b.iter(|| {
+			// Simulate 100 cache operations
+			for i in 0..100 {
+				let ns = format!("ns_{}", black_box(i % 10));
+				let db = format!("db_{}", black_box(i % 500));
+
+				if i % 5 == 0 {
+					// 20% writes
+					cache.insert(
+						StringKey(ns.clone(), db.clone()),
+						BenchValue {
+							data: vec![0u8; 128],
+						},
+					);
+				} else {
+					// 80% reads - requires cloning strings even just to check
+					let key = StringKey(ns, db);
+					if let Some(val) = cache.get_clone(&key) {
+						black_box(val);
+					}
+				}
+			}
+		});
+	});
+
+	// Benchmark: Borrowed key approach (zero allocation for reads)
+	group.bench_function("borrowed_key", |b| {
+		b.iter(|| {
+			// Simulate 100 cache operations
+			for i in 0..100 {
+				let ns = format!("ns_{}", black_box(i % 10));
+				let db = format!("db_{}", black_box(i % 500));
+
+				if i % 5 == 0 {
+					// 20% writes
+					cache.insert(
+						StringKey(ns.clone(), db.clone()),
+						BenchValue {
+							data: vec![0u8; 128],
+						},
+					);
+				} else {
+					// 80% reads - zero allocation lookup
+					let key_ref = StringKeyRef(&ns, &db);
+					if let Some(val) = cache.get_clone_by::<StringKey, _>(&key_ref) {
+						black_box(val);
+					}
+				}
+			}
+		});
+	});
+
+	group.finish();
+}
+
+fn bench_borrowed_key_different_sizes(c: &mut Criterion) {
+	let mut group = c.benchmark_group("borrowed_key/key_sizes");
+
+	for key_size in [10, 50, 100, 200] {
+		let cache = Arc::new(Cache::new(1024 * 1024));
+
+		// Create keys of different sizes
+		let large_prefix = "x".repeat(key_size);
+
+		// Pre-populate
+		for i in 0..100 {
+			cache.insert(
+				StringKey(format!("{}{}", large_prefix, i), format!("db_{}", i)),
+				BenchValue {
+					data: vec![0u8; 64],
+				},
+			);
+		}
+
+		group.bench_with_input(BenchmarkId::new("owned_key", key_size), &key_size, |b, &size| {
+			let prefix = "x".repeat(size);
+			b.iter(|| {
+				for i in 0..100 {
+					let key = StringKey(
+						format!("{}{}", prefix, black_box(i)),
+						format!("db_{}", black_box(i)),
+					);
+					black_box(cache.get(&key));
+				}
+			});
+		});
+
+		group.bench_with_input(
+			BenchmarkId::new("borrowed_key", key_size),
+			&key_size,
+			|b, &size| {
+				let prefix = "x".repeat(size);
+				b.iter(|| {
+					for i in 0..100 {
+						let ns = format!("{}{}", prefix, black_box(i));
+						let db = format!("db_{}", black_box(i));
+						let key_ref = StringKeyRef(&ns, &db);
+						black_box(cache.get_by::<StringKey, _>(&key_ref));
+					}
+				});
+			},
+		);
+	}
+
+	group.finish();
+}
+
 criterion_group!(
 	benches,
 	bench_insert,
@@ -545,7 +827,13 @@ criterion_group!(
 	bench_comparison_mixed_workload,
 	bench_comparison_concurrent_reads,
 	bench_comparison_eviction_pressure,
-	bench_comparison_zipf_distribution
+	bench_comparison_zipf_distribution,
+	// Borrowed key benchmarks
+	bench_owned_vs_borrowed_get,
+	bench_owned_vs_borrowed_get_clone,
+	bench_owned_vs_borrowed_contains,
+	bench_borrowed_key_realistic_workload,
+	bench_borrowed_key_different_sizes
 );
 
 criterion_main!(benches);

@@ -4,12 +4,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use parking_lot::RwLock;
 
-use crate::erased::{Entry, ErasedKey, ErasedKeyRef};
+use crate::erased::{Entry, ErasedKey, ErasedKeyLookup, ErasedKeyRef};
 use crate::guard::Guard;
 #[cfg(feature = "metrics")]
 use crate::metrics::CacheMetrics;
 use crate::shard::Shard;
-use crate::traits::CacheKey;
+use crate::traits::{CacheKey, CacheKeyLookup};
 
 /// Thread-safe cache with weight-stratified clock eviction.
 ///
@@ -312,6 +312,112 @@ impl Cache {
 		entry.value_ref::<K::Value>().cloned()
 	}
 
+	/// Retrieve a value via guard using a borrowed lookup key (zero allocation).
+	///
+	/// This method allows looking up entries using a borrowed key type `Q` that
+	/// implements `CacheKeyLookup<K>`, enabling zero-allocation lookups. For example,
+	/// you can use `(&str, &str)` to look up entries stored with `(String, String)` keys.
+	///
+	/// # Warning
+	///
+	/// Do NOT hold this guard across `.await` points. Use `get_clone_by()` instead
+	/// for async contexts.
+	///
+	/// # Example
+	///
+	/// ```ignore
+	/// // Define borrowed lookup type
+	/// struct DbCacheKeyRef<'a>(&'a str, &'a str);
+	///
+	/// impl Hash for DbCacheKeyRef<'_> {
+	///     fn hash<H: Hasher>(&self, state: &mut H) {
+	///         self.0.hash(state);
+	///         self.1.hash(state);
+	///     }
+	/// }
+	///
+	/// impl CacheKeyLookup<DbCacheKey> for DbCacheKeyRef<'_> {
+	///     fn eq_key(&self, key: &DbCacheKey) -> bool {
+	///         self.0 == key.0 && self.1 == key.1
+	///     }
+	/// }
+	///
+	/// // Zero-allocation lookup
+	/// let value = cache.get_by::<DbCacheKey, _>(&DbCacheKeyRef(ns, db));
+	/// ```
+	pub fn get_by<K, Q>(&self, key: &Q) -> Option<Guard<'_, K::Value>>
+	where
+		K: CacheKey,
+		Q: CacheKeyLookup<K> + ?Sized,
+	{
+		let key_ref = ErasedKeyLookup::new(key); // Zero allocation
+		let shard_lock = self.get_shard(key_ref.hash);
+
+		// Acquire read lock
+		let shard = shard_lock.read();
+
+		// Look up entry (bumps reference counter internally, zero allocation)
+		let Some(entry) = shard.get_ref_by(&key_ref) else {
+			// Metrics: track miss
+			#[cfg(feature = "metrics")]
+			self.misses.fetch_add(1, Ordering::Relaxed);
+			return None;
+		};
+
+		// Metrics: track hit
+		#[cfg(feature = "metrics")]
+		self.hits.fetch_add(1, Ordering::Relaxed);
+
+		// Get pointer to value (use value_ref for type-safe downcast)
+		let value_ref = entry.value_ref::<K::Value>()?;
+		let value_ptr = value_ref as *const K::Value;
+
+		// SAFETY: We hold a read lock on the shard, so the entry won't be modified
+		// or dropped while the guard exists. The guard ties its lifetime to the lock.
+		unsafe { Some(Guard::new(shard, value_ptr)) }
+	}
+
+	/// Retrieve a cloned value using a borrowed lookup key. Safe to hold across `.await` points.
+	///
+	/// This method allows looking up entries using a borrowed key type `Q` that
+	/// implements `CacheKeyLookup<K>`, enabling zero-allocation lookups. For example,
+	/// you can use `(&str, &str)` to look up entries stored with `(String, String)` keys.
+	///
+	/// Requires `V: Clone`. This is the preferred method for async code.
+	///
+	/// # Example
+	///
+	/// ```ignore
+	/// // Zero-allocation lookup with cloned result
+	/// let value = cache.get_clone_by::<DbCacheKey, _>(&DbCacheKeyRef(ns, db));
+	/// ```
+	pub fn get_clone_by<K, Q>(&self, key: &Q) -> Option<K::Value>
+	where
+		K: CacheKey,
+		K::Value: Clone,
+		Q: CacheKeyLookup<K> + ?Sized,
+	{
+		let key_ref = ErasedKeyLookup::new(key); // Zero allocation
+		let shard_lock = self.get_shard(key_ref.hash);
+
+		// Short-lived read lock
+		let shard = shard_lock.read();
+
+		let Some(entry) = shard.get_ref_by(&key_ref) else {
+			// Metrics: track miss
+			#[cfg(feature = "metrics")]
+			self.misses.fetch_add(1, Ordering::Relaxed);
+			return None;
+		};
+
+		// Metrics: track hit
+		#[cfg(feature = "metrics")]
+		self.hits.fetch_add(1, Ordering::Relaxed);
+
+		// Clone the value
+		entry.value_ref::<K::Value>().cloned()
+	}
+
 	/// Remove a key from the cache.
 	///
 	/// # Runtime Complexity
@@ -348,6 +454,30 @@ impl Cache {
 
 		// Use get_ref for zero-allocation lookup
 		shard.get_ref(&key_ref).is_some()
+	}
+
+	/// Check if a borrowed lookup key exists (zero allocation).
+	///
+	/// This method allows checking existence using a borrowed key type `Q` that
+	/// implements `CacheKeyLookup<K>`, enabling zero-allocation lookups.
+	///
+	/// # Example
+	///
+	/// ```ignore
+	/// // Zero-allocation existence check
+	/// let exists = cache.contains_by::<DbCacheKey, _>(&DbCacheKeyRef(ns, db));
+	/// ```
+	pub fn contains_by<K, Q>(&self, key: &Q) -> bool
+	where
+		K: CacheKey,
+		Q: CacheKeyLookup<K> + ?Sized,
+	{
+		let key_ref = ErasedKeyLookup::new(key); // Zero allocation
+		let shard_lock = self.get_shard(key_ref.hash);
+		let shard = shard_lock.read();
+
+		// Use get_ref_by for zero-allocation lookup
+		shard.get_ref_by(&key_ref).is_some()
 	}
 
 	/// Current total size in bytes.
@@ -568,5 +698,142 @@ mod tests {
 
 		assert_send::<Cache>();
 		assert_sync::<Cache>();
+	}
+
+	// Tests for borrowed key lookups
+
+	#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+	struct DbCacheKey(String, String);
+
+	impl CacheKey for DbCacheKey {
+		type Value = TestValue;
+	}
+
+	struct DbCacheKeyRef<'a>(&'a str, &'a str);
+
+	impl std::hash::Hash for DbCacheKeyRef<'_> {
+		fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+			// MUST match DbCacheKey's hash implementation
+			self.0.hash(state);
+			self.1.hash(state);
+		}
+	}
+
+	impl CacheKeyLookup<DbCacheKey> for DbCacheKeyRef<'_> {
+		fn eq_key(&self, key: &DbCacheKey) -> bool {
+			self.0 == key.0 && self.1 == key.1
+		}
+	}
+
+	#[test]
+	fn test_borrowed_key_lookup_get_by() {
+		let cache = Cache::new(1024);
+
+		let key = DbCacheKey("namespace".to_string(), "database".to_string());
+		let value = TestValue {
+			data: "test_data".to_string(),
+		};
+
+		cache.insert(key.clone(), value.clone());
+
+		// Lookup using borrowed key (zero allocation)
+		let borrowed_key = DbCacheKeyRef("namespace", "database");
+		let retrieved = cache.get_by::<DbCacheKey, _>(&borrowed_key);
+		assert!(retrieved.is_some());
+		assert_eq!(*retrieved.unwrap(), value);
+
+		// Lookup with non-existent key
+		let borrowed_key_missing = DbCacheKeyRef("namespace", "missing");
+		let retrieved = cache.get_by::<DbCacheKey, _>(&borrowed_key_missing);
+		assert!(retrieved.is_none());
+	}
+
+	#[test]
+	fn test_borrowed_key_lookup_get_clone_by() {
+		let cache = Cache::new(1024);
+
+		let key = DbCacheKey("ns".to_string(), "db".to_string());
+		let value = TestValue {
+			data: "cloned_data".to_string(),
+		};
+
+		cache.insert(key.clone(), value.clone());
+
+		// Lookup using borrowed key (zero allocation)
+		let borrowed_key = DbCacheKeyRef("ns", "db");
+		let retrieved = cache.get_clone_by::<DbCacheKey, _>(&borrowed_key);
+		assert_eq!(retrieved, Some(value));
+
+		// Lookup with non-existent key
+		let borrowed_key_missing = DbCacheKeyRef("ns", "missing");
+		let retrieved = cache.get_clone_by::<DbCacheKey, _>(&borrowed_key_missing);
+		assert_eq!(retrieved, None);
+	}
+
+	#[test]
+	fn test_borrowed_key_lookup_contains_by() {
+		let cache = Cache::new(1024);
+
+		let key = DbCacheKey("catalog".to_string(), "schema".to_string());
+		let value = TestValue {
+			data: "contains_test".to_string(),
+		};
+
+		cache.insert(key.clone(), value);
+
+		// Check existence using borrowed key (zero allocation)
+		let borrowed_key = DbCacheKeyRef("catalog", "schema");
+		assert!(cache.contains_by::<DbCacheKey, _>(&borrowed_key));
+
+		// Check non-existent key
+		let borrowed_key_missing = DbCacheKeyRef("catalog", "missing");
+		assert!(!cache.contains_by::<DbCacheKey, _>(&borrowed_key_missing));
+	}
+
+	#[test]
+	fn test_borrowed_key_lookup_multiple_entries() {
+		let cache = Cache::new(4096);
+
+		// Insert multiple entries
+		for i in 0..10 {
+			let key = DbCacheKey(format!("ns{}", i), format!("db{}", i));
+			let value = TestValue {
+				data: format!("data{}", i),
+			};
+			cache.insert(key, value);
+		}
+
+		// Lookup each using borrowed keys
+		for i in 0..10 {
+			let ns = format!("ns{}", i);
+			let db = format!("db{}", i);
+			let borrowed_key = DbCacheKeyRef(&ns, &db);
+
+			let retrieved = cache.get_clone_by::<DbCacheKey, _>(&borrowed_key);
+			assert!(retrieved.is_some());
+			assert_eq!(retrieved.unwrap().data, format!("data{}", i));
+		}
+	}
+
+	#[test]
+	fn test_borrowed_key_existing_api_still_works() {
+		let cache = Cache::new(1024);
+
+		let key = DbCacheKey("test".to_string(), "key".to_string());
+		let value = TestValue {
+			data: "existing_api".to_string(),
+		};
+
+		cache.insert(key.clone(), value.clone());
+
+		// Existing API should still work (blanket impl)
+		let retrieved = cache.get(&key);
+		assert!(retrieved.is_some());
+		assert_eq!(*retrieved.unwrap(), value);
+
+		assert!(cache.contains(&key));
+
+		let cloned = cache.get_clone(&key);
+		assert_eq!(cloned, Some(value));
 	}
 }
