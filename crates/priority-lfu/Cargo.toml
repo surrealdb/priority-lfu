@@ -6,10 +6,19 @@ authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
 license.workspace = true
+readme = "../../README.md"
 description = "A high-performance, concurrent, in-memory cache with W-TinyLFU eviction policy and weight-based prioritization."
 documentation = "https://docs.rs/priority-lfu/"
 keywords = ["cache", "weighted", "priority", "lfu", "eviction"]
 categories = ["caching"]
+include = [
+    "src/**/*",
+    "benches/**/*",
+    "tests/**/*",
+    "examples/**/*",
+    "../../README.md",
+    "Cargo.toml",
+]
 
 [lib]
 bench = false
