@@ -18,7 +18,7 @@ jobs:
   release:
     name: Tag and publish release
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'chore(release): bump version to ')
+    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'chore(release): bump version to ') }}
 
     steps:
       - uses: actions/checkout@v4
