@@ -1,0 +1,48 @@
+[package]
+name = "priority-lfu"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+description = "A high-performance, concurrent, in-memory cache with W-TinyLFU eviction policy and weight-based prioritization."
+documentation = "https://docs.rs/priority-lfu/"
+keywords = ["cache", "weighted", "priority", "lfu", "eviction"]
+categories = ["caching"]
+
+[features]
+default = ["bytes", "chrono", "geo", "uuid", "regex", "rust_decimal"]
+metrics = []
+
+[dependencies]
+parking_lot.workspace = true
+indexmap.workspace = true
+ahash.workspace = true
+hashbrown = "^0.16"
+priority-lfu-derive.workspace = true
+
+slotmap = { version = "^1", optional = true }
+slab = { version = "^0.4", optional = true }
+arrayvec = { version = "^0.7", optional = true }
+smallvec = { version = "^1", optional = true }
+chrono = { version = "^0.4", optional = true }
+uuid = { version = "^1.12", optional = true }
+geo = { version = "^0.32", optional = true }
+regex = { version = "^1", optional = true }
+rust_decimal = { version = "^1", optional = true }
+bytes = { version = "^1", optional = true }
+
+[dev-dependencies]
+tokio.workspace = true
+criterion.workspace = true
+proptest.workspace = true
+trybuild.workspace = true
+quick_cache = "0.6"
+
+[[bench]]
+name = "cache_benchmark"
+harness = false
+
+[lints]
+workspace = true
