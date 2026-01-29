@@ -8,7 +8,7 @@ on:
 jobs:
   benchmark:
     name: Run benchmarks
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, benchmarking]
     steps:
       - uses: actions/checkout@v4
       

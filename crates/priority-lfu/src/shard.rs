@@ -486,9 +486,9 @@ mod tests {
 		let standard_entry = make_entry(50, CachePolicy::Standard);
 		shard.insert(standard_key, standard_entry);
 
-		let durable_key = make_key(3, CachePolicy::Critical);
-		let durable_entry = make_entry(50, CachePolicy::Critical);
-		shard.insert(durable_key, durable_entry);
+		let critical_key = make_key(3, CachePolicy::Critical);
+		let critical_entry = make_entry(50, CachePolicy::Critical);
+		shard.insert(critical_key, critical_entry);
 
 		// Fill to trigger eviction - volatile should be evicted first
 		for i in 10..15 {

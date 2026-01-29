@@ -44,7 +44,6 @@ impl CacheKey for UserId {
     fn policy(&self) -> CachePolicy {
         // Different eviction priorities:
         // Critical - last to be evicted (metadata, schemas)
-        // Durable - strong retention (active records)
         // Standard - normal eviction (default)
         // Volatile - first to be evicted (temp data)
         
@@ -242,7 +241,7 @@ When space is needed, the cache uses a clock sweep starting from the lowest prio
    - If **clock_bit** is set → clear it and advance
    - If **clock_bit** is clear and **frequency** = 0 → **evict**
    - If **clock_bit** is clear and **frequency** > 0 → decrement frequency and advance
-3. If bucket is empty, move to next higher priority bucket (Standard → Durable → Critical)
+3. If bucket is empty, move to next higher priority bucket (Volatile → Standard → Critical)
 
 Each access sets the clock_bit and increments frequency (saturating at 255).
 
@@ -251,7 +250,7 @@ Each access sets the clock_bit and increments frequency (saturating at 255).
 This design provides **predictable priority-based eviction**:
 
 ```rust,ignore
-// Eviction order: Volatile → Standard → Durable → Critical
+// Eviction order: Volatile → Standard → Critical
 // Within each bucket: Clock sweep with LFU tie-breaking
 
 CachePolicy::Volatile   // Evicted first
@@ -283,7 +282,7 @@ Benefits:
 ```
 
 Each shard contains:
-- **Policy Buckets**: Four priority buckets (Critical, Durable, Standard, Volatile)
+- **Policy Buckets**: Four priority buckets (Critical, Standard, Volatile)
 - **Clock Hands**: One per bucket for efficient clock sweep
 - **Entry Map**: HashMap with pre-computed hashes for O(1) lookup
 
