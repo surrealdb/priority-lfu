@@ -34,8 +34,8 @@ use hashbrown::HashMap;
 use hashbrown::hash_map::Entry as HashMapEntry;
 use indexmap::IndexMap;
 
-use crate::erased::{Entry, ErasedKey, ErasedKeyRef};
-use crate::traits::NUM_POLICY_BUCKETS;
+use crate::erased::{Entry, ErasedKey, ErasedKeyLookup, ErasedKeyRef};
+use crate::traits::{CacheKey, CacheKeyLookup, NUM_POLICY_BUCKETS};
 
 /// Passthrough hasher for ErasedKey (which already has pre-computed hash).
 #[derive(Default)]
@@ -248,6 +248,34 @@ impl Shard {
 
 	/// Get an entry by borrowed key reference (zero allocation).
 	pub fn get_ref<K: crate::traits::CacheKey>(&self, key_ref: &ErasedKeyRef<K>) -> Option<&Entry> {
+		// Use raw_entry to search with pre-computed hash
+		let (_key, entry) = self
+			.entries
+			.raw_entry()
+			.from_hash(key_ref.hash, |stored_key| key_ref.equals(stored_key))?;
+
+		// Set clock bit
+		entry.clock_bit.store(true, Ordering::Relaxed);
+		// Increment frequency (saturating at 255)
+		// Using load+store avoids CAS loop overhead; small races are acceptable for heuristic
+		let freq = entry.frequency.load(Ordering::Relaxed);
+		if freq < 255 {
+			entry.frequency.store(freq + 1, Ordering::Relaxed);
+		}
+
+		Some(entry)
+	}
+
+	/// Get an entry by borrowed lookup key (zero allocation).
+	///
+	/// This allows looking up entries using a borrowed key type `Q` that implements
+	/// `CacheKeyLookup<K>`, enabling zero-allocation lookups (e.g., using `&str` tuples
+	/// to look up `String` tuples).
+	pub fn get_ref_by<K, Q>(&self, key_ref: &ErasedKeyLookup<K, Q>) -> Option<&Entry>
+	where
+		K: CacheKey,
+		Q: CacheKeyLookup<K> + ?Sized,
+	{
 		// Use raw_entry to search with pre-computed hash
 		let (_key, entry) = self
 			.entries

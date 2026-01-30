@@ -1,10 +1,11 @@
 use std::any::{Any, TypeId};
 use std::hash::{Hash, Hasher};
+use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8};
 
 use crate::deepsize::DeepSizeOf;
-use crate::traits::{CacheKey, CachePolicy};
+use crate::traits::{CacheKey, CacheKeyLookup, CachePolicy};
 
 /// Type-erased cache key with pre-computed hash.
 ///
@@ -152,6 +153,67 @@ impl<'a, K: CacheKey> ErasedKeyRef<'a, K> {
 }
 
 impl<'a, K: CacheKey> Hash for ErasedKeyRef<'a, K> {
+	fn hash<H: Hasher>(&self, state: &mut H) {
+		// Use pre-computed hash to avoid re-hashing on every lookup
+		self.hash.hash(state);
+	}
+}
+
+/// Borrowed reference to a lookup key for zero-allocation lookups with different key types.
+///
+/// This type holds a borrowed reference to a lookup key `Q` that can be used to find
+/// entries stored with key type `K`, allowing HashMap lookups without allocating an owned key.
+///
+/// Unlike `ErasedKeyRef` which requires `Q = K`, this type allows `Q` to be a different
+/// type that implements `CacheKeyLookup<K>` (e.g., `&str` tuples to look up `String` tuples).
+pub(crate) struct ErasedKeyLookup<'a, K, Q: ?Sized> {
+	pub type_id: TypeId,
+	pub hash: u64,
+	pub key: &'a Q,
+	_marker: PhantomData<K>,
+}
+
+impl<'a, K: CacheKey, Q> ErasedKeyLookup<'a, K, Q>
+where
+	Q: CacheKeyLookup<K> + ?Sized,
+{
+	/// Create a borrowed key reference for lookup (no allocation).
+	pub fn new(key: &'a Q) -> Self {
+		let type_id = TypeId::of::<K>();
+
+		// Compute hash of the lookup key
+		let mut hasher = ahash::AHasher::default();
+		type_id.hash(&mut hasher);
+		key.hash(&mut hasher);
+		let hash = hasher.finish();
+
+		Self {
+			type_id,
+			hash,
+			key,
+			_marker: PhantomData,
+		}
+	}
+
+	/// Check equality with owned ErasedKey.
+	pub fn equals(&self, other: &ErasedKey) -> bool {
+		if self.hash != other.hash || self.type_id != other.type_id {
+			return false;
+		}
+
+		// Downcast and compare using CacheKeyLookup trait
+		if let Some(other_key) = other.data.downcast_ref::<K>() {
+			self.key.eq_key(other_key)
+		} else {
+			false
+		}
+	}
+}
+
+impl<'a, K: CacheKey, Q> Hash for ErasedKeyLookup<'a, K, Q>
+where
+	Q: CacheKeyLookup<K> + ?Sized,
+{
 	fn hash<H: Hasher>(&self, state: &mut H) {
 		// Use pre-computed hash to avoid re-hashing on every lookup
 		self.hash.hash(state);

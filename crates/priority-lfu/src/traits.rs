@@ -61,3 +61,72 @@ pub trait CacheKey: Hash + Eq + Clone + Send + Sync + 'static {
 		CachePolicy::Standard
 	}
 }
+
+/// Trait for borrowed keys that can look up entries of type `K`.
+///
+/// This trait enables zero-allocation cache lookups using borrowed key types.
+/// For example, you can use `(&str, &str)` to look up entries stored with
+/// `(String, String)` keys, avoiding the allocation of owned strings.
+///
+/// # Hash Consistency Requirement
+///
+/// **CRITICAL**: The `Hash` implementation MUST produce the same hash as `K`
+/// for equivalent keys. If the hashes differ, lookups will fail.
+///
+/// # Example
+///
+/// ```
+/// use std::hash::{Hash, Hasher};
+/// use priority_lfu::{CacheKey, CacheKeyLookup, CachePolicy, DeepSizeOf};
+///
+/// // Owned key type
+/// #[derive(Hash, Eq, PartialEq, Clone)]
+/// struct DbCacheKey(String, String);
+///
+/// impl CacheKey for DbCacheKey {
+///     type Value = String;
+/// }
+///
+/// // Borrowed lookup type
+/// struct DbCacheKeyRef<'a>(&'a str, &'a str);
+///
+/// impl Hash for DbCacheKeyRef<'_> {
+///     fn hash<H: Hasher>(&self, state: &mut H) {
+///         // MUST match DbCacheKey's hash implementation
+///         self.0.hash(state);
+///         self.1.hash(state);
+///     }
+/// }
+///
+/// impl CacheKeyLookup<DbCacheKey> for DbCacheKeyRef<'_> {
+///     fn eq_key(&self, key: &DbCacheKey) -> bool {
+///         self.0 == key.0 && self.1 == key.1
+///     }
+///
+///     fn to_owned_key(self) -> DbCacheKey {
+///         DbCacheKey(self.0.to_owned(), self.1.to_owned())
+///     }
+/// }
+/// ```
+pub trait CacheKeyLookup<K: CacheKey>: Hash {
+	/// Check equality against an owned key.
+	///
+	/// Returns `true` if this borrowed key is equivalent to the given owned key.
+	fn eq_key(&self, key: &K) -> bool;
+
+	/// Convert this borrowed key to an owned key.
+	fn to_owned_key(self) -> K;
+}
+
+/// Blanket implementation: every `CacheKey` can look up itself.
+///
+/// This allows existing code using `cache.get(&key)` to continue working unchanged.
+impl<K: CacheKey> CacheKeyLookup<K> for K {
+	fn eq_key(&self, key: &K) -> bool {
+		self == key
+	}
+
+	fn to_owned_key(self) -> K {
+		self
+	}
+}

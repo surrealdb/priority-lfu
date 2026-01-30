@@ -18,4 +18,4 @@ pub use guard::Guard;
 #[cfg(feature = "metrics")]
 pub use metrics::CacheMetrics;
 pub use priority_lfu_derive::*;
-pub use traits::{CacheKey, CachePolicy};
+pub use traits::{CacheKey, CacheKeyLookup, CachePolicy};
