@@ -560,6 +560,10 @@ impl CacheKeyLookup<StringKey> for StringKeyRef<'_> {
 	fn eq_key(&self, key: &StringKey) -> bool {
 		self.0 == key.0 && self.1 == key.1
 	}
+
+	fn to_owned_key(self) -> StringKey {
+		StringKey(self.0.to_owned(), self.1.to_owned())
+	}
 }
 
 fn bench_owned_vs_borrowed_get(c: &mut Criterion) {

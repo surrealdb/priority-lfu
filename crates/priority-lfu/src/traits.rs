@@ -102,6 +102,10 @@ pub trait CacheKey: Hash + Eq + Clone + Send + Sync + 'static {
 ///     fn eq_key(&self, key: &DbCacheKey) -> bool {
 ///         self.0 == key.0 && self.1 == key.1
 ///     }
+///
+///     fn to_owned_key(self) -> DbCacheKey {
+///         DbCacheKey(self.0.to_owned(), self.1.to_owned())
+///     }
 /// }
 /// ```
 pub trait CacheKeyLookup<K: CacheKey>: Hash {
@@ -109,6 +113,9 @@ pub trait CacheKeyLookup<K: CacheKey>: Hash {
 	///
 	/// Returns `true` if this borrowed key is equivalent to the given owned key.
 	fn eq_key(&self, key: &K) -> bool;
+
+	/// Convert this borrowed key to an owned key.
+	fn to_owned_key(self) -> K;
 }
 
 /// Blanket implementation: every `CacheKey` can look up itself.
@@ -117,5 +124,9 @@ pub trait CacheKeyLookup<K: CacheKey>: Hash {
 impl<K: CacheKey> CacheKeyLookup<K> for K {
 	fn eq_key(&self, key: &K) -> bool {
 		self == key
+	}
+
+	fn to_owned_key(self) -> K {
+		self
 	}
 }

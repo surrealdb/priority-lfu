@@ -569,6 +569,8 @@ unsafe impl Sync for Cache {}
 
 #[cfg(test)]
 mod tests {
+	use std::borrow::Borrow;
+
 	use super::*;
 	use crate::DeepSizeOf;
 
@@ -722,6 +724,10 @@ mod tests {
 	impl CacheKeyLookup<DbCacheKey> for DbCacheKeyRef<'_> {
 		fn eq_key(&self, key: &DbCacheKey) -> bool {
 			self.0 == key.0 && self.1 == key.1
+		}
+
+		fn to_owned_key(self) -> DbCacheKey {
+			DbCacheKey(self.0.to_owned(), self.1.to_owned())
 		}
 	}
 
