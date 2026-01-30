@@ -569,8 +569,6 @@ unsafe impl Sync for Cache {}
 
 #[cfg(test)]
 mod tests {
-	use std::borrow::Borrow;
-
 	use super::*;
 	use crate::DeepSizeOf;
 
