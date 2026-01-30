@@ -249,7 +249,7 @@ impl Cache {
 	/// This method performs a zero-allocation hash table lookup and atomically
 	/// increments the reference counter for Clock-PRO.
 	pub fn get<K: CacheKey>(&self, key: &K) -> Option<Guard<'_, K::Value>> {
-		let key_ref = ErasedKeyRef::new(key); // Zero allocation
+		let key_ref = ErasedKeyRef::new(key);
 		let shard_lock = self.get_shard(key_ref.hash);
 
 		// Acquire read lock
@@ -291,7 +291,7 @@ impl Cache {
 	where
 		K::Value: Clone,
 	{
-		let key_ref = ErasedKeyRef::new(key); // Zero allocation
+		let key_ref = ErasedKeyRef::new(key);
 		let shard_lock = self.get_shard(key_ref.hash);
 
 		// Short-lived read lock
@@ -350,7 +350,7 @@ impl Cache {
 		K: CacheKey,
 		Q: CacheKeyLookup<K> + ?Sized,
 	{
-		let key_ref = ErasedKeyLookup::new(key); // Zero allocation
+		let key_ref = ErasedKeyLookup::new(key);
 		let shard_lock = self.get_shard(key_ref.hash);
 
 		// Acquire read lock
@@ -397,7 +397,7 @@ impl Cache {
 		K::Value: Clone,
 		Q: CacheKeyLookup<K> + ?Sized,
 	{
-		let key_ref = ErasedKeyLookup::new(key); // Zero allocation
+		let key_ref = ErasedKeyLookup::new(key);
 		let shard_lock = self.get_shard(key_ref.hash);
 
 		// Short-lived read lock
@@ -448,7 +448,7 @@ impl Cache {
 
 	/// Check if a key exists (zero allocation).
 	pub fn contains<K: CacheKey>(&self, key: &K) -> bool {
-		let key_ref = ErasedKeyRef::new(key); // Zero allocation
+		let key_ref = ErasedKeyRef::new(key);
 		let shard_lock = self.get_shard(key_ref.hash);
 		let shard = shard_lock.read();
 
@@ -472,7 +472,7 @@ impl Cache {
 		K: CacheKey,
 		Q: CacheKeyLookup<K> + ?Sized,
 	{
-		let key_ref = ErasedKeyLookup::new(key); // Zero allocation
+		let key_ref = ErasedKeyLookup::new(key);
 		let shard_lock = self.get_shard(key_ref.hash);
 		let shard = shard_lock.read();
 
