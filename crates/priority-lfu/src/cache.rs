@@ -1,3 +1,4 @@
+use std::sync::Arc;
 #[cfg(feature = "metrics")]
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -6,6 +7,7 @@ use parking_lot::RwLock;
 
 use crate::erased::{Entry, ErasedKey, ErasedKeyLookup, ErasedKeyRef};
 use crate::guard::Guard;
+use crate::lifecycle::{DefaultLifecycle, Lifecycle};
 #[cfg(feature = "metrics")]
 use crate::metrics::CacheMetrics;
 use crate::shard::Shard;
@@ -49,6 +51,12 @@ use crate::traits::{CacheKey, CacheKeyLookup};
 /// - Large caches (>= 256KB): 64 shards
 /// - Smaller caches: Scaled down proportionally (e.g., 64KB → 16 shards, 4KB → 1 shard)
 ///
+/// # Lifecycle Hooks
+///
+/// The cache supports lifecycle hooks via the [`Lifecycle`] trait. Hooks are called
+/// synchronously when entries are evicted, removed, or cleared. Use [`CacheBuilder`]
+/// to configure a custom lifecycle.
+///
 /// # Async Usage
 ///
 /// ```ignore
@@ -63,9 +71,11 @@ use crate::traits::{CacheKey, CacheKeyLookup};
 ///     }
 /// });
 /// ```
-pub struct Cache {
+pub struct Cache<L: Lifecycle = DefaultLifecycle> {
 	/// Sharded storage
 	shards: Vec<RwLock<Shard>>,
+	/// Lifecycle hooks
+	lifecycle: Arc<L>,
 	/// Current total size in bytes
 	current_size: AtomicUsize,
 	/// Total entry count
@@ -120,7 +130,7 @@ fn compute_shard_count(capacity: usize, desired_shards: usize) -> usize {
 	desired_shards.min(max_shards).next_power_of_two().max(1)
 }
 
-impl Cache {
+impl Cache<DefaultLifecycle> {
 	/// Create a new cache with the given maximum size in bytes.
 	///
 	/// Uses default configuration with automatic shard scaling. The number of shards
@@ -130,10 +140,10 @@ impl Cache {
 	/// - Large caches (>= 256KB): 64 shards
 	/// - Smaller caches: Scaled down to ensure at least 4KB per shard
 	///
-	/// For explicit control over shard count, use [`CacheBuilder`] or [`with_shards`].
+	/// For explicit control over shard count or lifecycle hooks, use [`CacheBuilder`].
 	pub fn new(max_size_bytes: usize) -> Self {
 		let shard_count = compute_shard_count(max_size_bytes, DEFAULT_SHARD_COUNT);
-		Self::with_shards_internal(max_size_bytes, shard_count)
+		Self::with_shards_and_lifecycle_internal(max_size_bytes, shard_count, DefaultLifecycle)
 	}
 
 	/// Create with custom shard count.
@@ -146,11 +156,37 @@ impl Cache {
 	/// premature eviction due to uneven hash distribution.
 	pub fn with_shards(max_size_bytes: usize, shard_count: usize) -> Self {
 		let shard_count = compute_shard_count(max_size_bytes, shard_count);
-		Self::with_shards_internal(max_size_bytes, shard_count)
+		Self::with_shards_and_lifecycle_internal(max_size_bytes, shard_count, DefaultLifecycle)
+	}
+}
+
+impl<L: Lifecycle> Cache<L> {
+	/// Create a new cache with a custom lifecycle.
+	///
+	/// For easier configuration, use [`CacheBuilder`] instead.
+	pub fn with_lifecycle(max_size_bytes: usize, lifecycle: L) -> Self {
+		let shard_count = compute_shard_count(max_size_bytes, DEFAULT_SHARD_COUNT);
+		Self::with_shards_and_lifecycle_internal(max_size_bytes, shard_count, lifecycle)
+	}
+
+	/// Create a new cache with custom shard count and lifecycle.
+	///
+	/// For easier configuration, use [`CacheBuilder`] instead.
+	pub fn with_shards_and_lifecycle(
+		max_size_bytes: usize,
+		shard_count: usize,
+		lifecycle: L,
+	) -> Self {
+		let shard_count = compute_shard_count(max_size_bytes, shard_count);
+		Self::with_shards_and_lifecycle_internal(max_size_bytes, shard_count, lifecycle)
 	}
 
 	/// Internal constructor that uses the shard count directly (already validated).
-	fn with_shards_internal(max_size_bytes: usize, shard_count: usize) -> Self {
+	fn with_shards_and_lifecycle_internal(
+		max_size_bytes: usize,
+		shard_count: usize,
+		lifecycle: L,
+	) -> Self {
 		// Divide capacity per shard
 		let size_per_shard = max_size_bytes / shard_count;
 
@@ -159,6 +195,7 @@ impl Cache {
 
 		Self {
 			shards,
+			lifecycle: Arc::new(lifecycle),
 			current_size: AtomicUsize::new(0),
 			entry_count: AtomicUsize::new(0),
 			shard_count,
@@ -182,6 +219,12 @@ impl Cache {
 	///
 	/// Returns the previous value if the key existed.
 	///
+	/// # Lifecycle Hooks
+	///
+	/// If entries are evicted to make room, [`Lifecycle::on_evict`] is called for each.
+	/// Note: The replaced value (if any) does NOT trigger `on_evict` - only automatic
+	/// evictions due to capacity pressure.
+	///
 	/// # Runtime Complexity
 	///
 	/// Expected case: O(1) for successful insertion without eviction.
@@ -201,7 +244,10 @@ impl Cache {
 		let mut shard = shard_lock.write();
 
 		// Insert (handles eviction internally via Clock-PRO)
-		let (old_entry, (num_evictions, evicted_size)) = shard.insert(erased_key, entry);
+		let (old_entry, stats, evicted_entries) = shard.insert(erased_key, entry);
+
+		// Release lock before calling lifecycle hooks to avoid holding lock during user code
+		drop(shard);
 
 		if let Some(ref old) = old_entry {
 			// Update size (might be different)
@@ -223,13 +269,18 @@ impl Cache {
 			self.inserts.fetch_add(1, Ordering::Relaxed);
 		}
 
-		// Account for evictions
-		if num_evictions > 0 {
-			self.entry_count.fetch_sub(num_evictions, Ordering::Relaxed);
-			self.current_size.fetch_sub(evicted_size, Ordering::Relaxed);
+		// Account for evictions and call lifecycle hooks
+		if stats.count > 0 {
+			self.entry_count.fetch_sub(stats.count, Ordering::Relaxed);
+			self.current_size.fetch_sub(stats.size, Ordering::Relaxed);
 			// Metrics: track evictions
 			#[cfg(feature = "metrics")]
-			self.evictions.fetch_add(num_evictions as u64, Ordering::Relaxed);
+			self.evictions.fetch_add(stats.count as u64, Ordering::Relaxed);
+
+			// Call lifecycle hooks for each evicted entry
+			for evicted in evicted_entries {
+				self.lifecycle.on_evict(evicted.key.data.as_ref());
+			}
 		}
 
 		old_entry.and_then(|e| e.into_value::<K::Value>())
@@ -420,6 +471,10 @@ impl Cache {
 
 	/// Remove a key from the cache.
 	///
+	/// # Lifecycle Hooks
+	///
+	/// Calls [`Lifecycle::on_remove`] with the removed key.
+	///
 	/// # Runtime Complexity
 	///
 	/// Expected case: O(1)
@@ -436,12 +491,18 @@ impl Cache {
 		let mut shard = shard_lock.write();
 		let entry = shard.remove(&erased_key)?;
 
+		// Release lock before calling lifecycle hooks
+		drop(shard);
+
 		self.current_size.fetch_sub(entry.size, Ordering::Relaxed);
 		self.entry_count.fetch_sub(1, Ordering::Relaxed);
 
 		// Metrics: track removal
 		#[cfg(feature = "metrics")]
 		self.removals.fetch_add(1, Ordering::Relaxed);
+
+		// Call lifecycle hook
+		self.lifecycle.on_remove(erased_key.data.as_ref());
 
 		entry.into_value::<K::Value>()
 	}
@@ -497,6 +558,10 @@ impl Cache {
 
 	/// Clear all entries.
 	///
+	/// # Lifecycle Hooks
+	///
+	/// Calls [`Lifecycle::on_clear`] for each removed entry.
+	///
 	/// # Runtime Complexity
 	///
 	/// O(n) where n is the total number of entries in the cache.
@@ -504,10 +569,14 @@ impl Cache {
 	/// This method acquires a write lock on each shard sequentially and clears
 	/// all data structures (HashMap and IndexMaps).
 	pub fn clear(&self) {
+		// Collect all entries from all shards, then call lifecycle hooks outside of locks
+		let mut all_entries = Vec::new();
+
 		for shard_lock in &self.shards {
 			let mut shard = shard_lock.write();
-			shard.clear();
+			all_entries.extend(shard.drain());
 		}
+
 		self.current_size.store(0, Ordering::Relaxed);
 		self.entry_count.store(0, Ordering::Relaxed);
 
@@ -520,6 +589,11 @@ impl Cache {
 			self.updates.store(0, Ordering::Relaxed);
 			self.evictions.store(0, Ordering::Relaxed);
 			self.removals.store(0, Ordering::Relaxed);
+		}
+
+		// Call lifecycle hooks for each cleared entry (outside of locks)
+		for evicted in all_entries {
+			self.lifecycle.on_clear(evicted.key.data.as_ref());
 		}
 	}
 
@@ -564,8 +638,9 @@ impl Cache {
 }
 
 // Thread safety: Cache can be shared across threads
-unsafe impl Send for Cache {}
-unsafe impl Sync for Cache {}
+// The L: Lifecycle bound already requires Send + Sync
+unsafe impl<L: Lifecycle> Send for Cache<L> {}
+unsafe impl<L: Lifecycle> Sync for Cache<L> {}
 
 #[cfg(test)]
 mod tests {
@@ -839,5 +914,160 @@ mod tests {
 
 		let cloned = cache.get_clone(&key);
 		assert_eq!(cloned, Some(value));
+	}
+
+	// Lifecycle tests
+
+	use std::any::Any;
+	use std::sync::Arc;
+	use std::sync::atomic::AtomicUsize;
+
+	use crate::CacheBuilder;
+	use crate::lifecycle::Lifecycle;
+
+	struct CountingLifecycle {
+		evict_count: Arc<AtomicUsize>,
+		remove_count: Arc<AtomicUsize>,
+		clear_count: Arc<AtomicUsize>,
+	}
+
+	impl CountingLifecycle {
+		fn new() -> (Self, Arc<AtomicUsize>, Arc<AtomicUsize>, Arc<AtomicUsize>) {
+			let evict_count = Arc::new(AtomicUsize::new(0));
+			let remove_count = Arc::new(AtomicUsize::new(0));
+			let clear_count = Arc::new(AtomicUsize::new(0));
+			(
+				Self {
+					evict_count: evict_count.clone(),
+					remove_count: remove_count.clone(),
+					clear_count: clear_count.clone(),
+				},
+				evict_count,
+				remove_count,
+				clear_count,
+			)
+		}
+	}
+
+	impl Lifecycle for CountingLifecycle {
+		fn on_evict(&self, _key: &dyn Any) {
+			self.evict_count.fetch_add(1, Ordering::Relaxed);
+		}
+
+		fn on_remove(&self, _key: &dyn Any) {
+			self.remove_count.fetch_add(1, Ordering::Relaxed);
+		}
+
+		fn on_clear(&self, _key: &dyn Any) {
+			self.clear_count.fetch_add(1, Ordering::Relaxed);
+		}
+	}
+
+	#[test]
+	fn test_lifecycle_on_evict() {
+		let (lifecycle, evict_count, _, _) = CountingLifecycle::new();
+
+		// Small cache that will trigger eviction
+		let cache = CacheBuilder::new(500).shards(1).lifecycle(lifecycle).build();
+
+		// Insert values that exceed capacity to trigger eviction
+		for i in 0..20 {
+			let key = TestKey(i);
+			let value = TestValue {
+				data: "x".repeat(50),
+			};
+			cache.insert(key, value);
+		}
+
+		// Should have evicted some entries
+		assert!(evict_count.load(Ordering::Relaxed) > 0, "Expected evictions but got none");
+	}
+
+	#[test]
+	fn test_lifecycle_on_clear() {
+		let (lifecycle, _, _, clear_count) = CountingLifecycle::new();
+
+		let cache = CacheBuilder::new(4096).lifecycle(lifecycle).build();
+
+		// Insert some entries
+		for i in 0..5 {
+			let key = TestKey(i);
+			let value = TestValue {
+				data: format!("value{}", i),
+			};
+			cache.insert(key, value);
+		}
+
+		assert_eq!(clear_count.load(Ordering::Relaxed), 0);
+
+		// Clear the cache
+		cache.clear();
+
+		// All entries should have triggered on_clear
+		assert_eq!(clear_count.load(Ordering::Relaxed), 5, "Expected 5 clear callbacks");
+	}
+
+	#[test]
+	fn test_lifecycle_on_remove() {
+		let (lifecycle, _, remove_count, _) = CountingLifecycle::new();
+
+		let cache = CacheBuilder::new(4096).lifecycle(lifecycle).build();
+
+		let key = TestKey(1);
+		let value = TestValue {
+			data: "test".to_string(),
+		};
+
+		cache.insert(key.clone(), value);
+
+		assert_eq!(remove_count.load(Ordering::Relaxed), 0);
+
+		// remove should trigger on_remove
+		let removed = cache.remove(&key);
+		assert!(removed.is_some());
+
+		assert_eq!(remove_count.load(Ordering::Relaxed), 1, "Expected 1 remove callback");
+	}
+
+	#[test]
+	fn test_lifecycle_typed_downcast() {
+		use crate::TypedLifecycle;
+
+		let evicted_keys = Arc::new(std::sync::Mutex::new(Vec::new()));
+		let keys_clone = evicted_keys.clone();
+
+		let lifecycle = TypedLifecycle::<TestKey, _>::new(move |key| {
+			keys_clone.lock().unwrap().push(key.0);
+		});
+
+		// Small cache to trigger eviction
+		let cache = CacheBuilder::new(500).shards(1).lifecycle(lifecycle).build();
+
+		// Insert values that will be evicted
+		for i in 0..20 {
+			let key = TestKey(i);
+			let value = TestValue {
+				data: "x".repeat(50),
+			};
+			cache.insert(key, value);
+		}
+
+		// Check that we captured evicted keys
+		let keys = evicted_keys.lock().unwrap();
+		assert!(!keys.is_empty(), "Expected some evicted keys to be captured");
+	}
+
+	#[test]
+	fn test_cache_with_lifecycle_is_send_sync() {
+		fn assert_send<T: Send>() {}
+		fn assert_sync<T: Sync>() {}
+
+		// Cache with default lifecycle
+		assert_send::<Cache>();
+		assert_sync::<Cache>();
+
+		// Cache with custom lifecycle
+		assert_send::<Cache<CountingLifecycle>>();
+		assert_sync::<Cache<CountingLifecycle>>();
 	}
 }

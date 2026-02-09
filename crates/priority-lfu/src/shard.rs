@@ -37,6 +37,23 @@ use indexmap::IndexMap;
 use crate::erased::{Entry, ErasedKey, ErasedKeyLookup, ErasedKeyRef};
 use crate::traits::{CacheKey, CacheKeyLookup, NUM_POLICY_BUCKETS};
 
+/// Eviction statistics returned from insert operations.
+#[derive(Debug, Clone, Default)]
+pub struct EvictionStats {
+	/// Number of entries evicted
+	pub count: usize,
+	/// Total size of evicted entries in bytes
+	pub size: usize,
+}
+
+/// An evicted entry with its key.
+pub struct EvictedEntry {
+	/// The evicted key
+	pub key: ErasedKey,
+	/// The evicted entry
+	pub entry: Entry,
+}
+
 /// Passthrough hasher for ErasedKey (which already has pre-computed hash).
 #[derive(Default)]
 pub(crate) struct PassthroughHasher(u64);
@@ -169,8 +186,12 @@ impl Shard {
 
 	/// Insert an entry into the shard.
 	///
-	/// Returns (previous_entry, (num_evictions, total_evicted_size)).
-	pub fn insert(&mut self, key: ErasedKey, entry: Entry) -> (Option<Entry>, (usize, usize)) {
+	/// Returns (previous_entry, eviction_stats, evicted_entries).
+	pub fn insert(
+		&mut self,
+		key: ErasedKey,
+		entry: Entry,
+	) -> (Option<Entry>, EvictionStats, Vec<EvictedEntry>) {
 		let size = entry.size;
 		let policy = entry.policy;
 
@@ -184,7 +205,7 @@ impl Shard {
 		}
 
 		// Evict until we have space (must happen before insert to avoid self-eviction)
-		let (num_evictions, total_evicted_size) = self.evict_until_space(size);
+		let (stats, evicted) = self.evict_until_space(size);
 
 		// Now use entry API for the actual insert (hash already computed, fast lookup)
 		let old = match self.entries.entry(key.clone()) {
@@ -199,25 +220,26 @@ impl Shard {
 		self.buckets[policy as usize].insert(key);
 		self.size_current += size;
 
-		(old, (num_evictions, total_evicted_size))
+		(old, stats, evicted)
 	}
 
 	/// Evict entries until there's space for `needed_size` bytes.
 	///
 	/// Optimized to batch evictions within the same bucket before moving to next priority,
 	/// reducing bucket priority iteration overhead.
-	/// Returns (num_evictions, total_evicted_size).
-	fn evict_until_space(&mut self, needed_size: usize) -> (usize, usize) {
-		let mut num_evictions = 0;
-		let mut total_evicted_size = 0;
+	/// Returns (eviction_stats, evicted_entries).
+	fn evict_until_space(&mut self, needed_size: usize) -> (EvictionStats, Vec<EvictedEntry>) {
+		let mut stats = EvictionStats::default();
+		let mut evicted = Vec::new();
 
 		// Try buckets from lowest priority (Volatile) to highest (Critical)
 		// Stay in each bucket until it's exhausted or we have enough space
 		for policy_idx in (0..NUM_POLICY_BUCKETS).rev() {
 			while self.size_current + needed_size > self.size_capacity {
-				if let Some(evicted_size) = self.evict_from_bucket(policy_idx) {
-					num_evictions += 1;
-					total_evicted_size += evicted_size;
+				if let Some(evicted_entry) = self.evict_from_bucket(policy_idx) {
+					stats.count += 1;
+					stats.size += evicted_entry.entry.size;
+					evicted.push(evicted_entry);
 				} else {
 					break; // This bucket is empty, try next priority
 				}
@@ -228,7 +250,7 @@ impl Shard {
 			}
 		}
 
-		(num_evictions, total_evicted_size)
+		(stats, evicted)
 	}
 
 	/// Get an entry by key, updating clock bit and frequency.
@@ -318,7 +340,10 @@ impl Shard {
 		self.entries.len()
 	}
 
-	/// Clear all entries.
+	/// Clear all entries without returning them.
+	///
+	/// For clearing with lifecycle callbacks, use [`drain`] instead.
+	#[allow(dead_code)]
 	pub fn clear(&mut self) {
 		self.entries.clear();
 		for bucket in &mut self.buckets {
@@ -327,10 +352,24 @@ impl Shard {
 		self.size_current = 0;
 	}
 
+	/// Drain all entries, returning them for lifecycle callbacks.
+	pub fn drain(&mut self) -> impl Iterator<Item = EvictedEntry> + '_ {
+		for bucket in &mut self.buckets {
+			bucket.clear();
+		}
+		self.size_current = 0;
+
+		self.entries.drain().map(|(key, entry)| EvictedEntry {
+			key,
+			entry,
+		})
+	}
+
 	/// Try to evict one entry from a specific bucket using clock algorithm.
 	///
 	/// Optimized to avoid cloning keys during the sweep - only clones when evicting.
-	fn evict_from_bucket(&mut self, policy_idx: usize) -> Option<usize> {
+	/// Returns the evicted entry with its key for lifecycle callbacks.
+	fn evict_from_bucket(&mut self, policy_idx: usize) -> Option<EvictedEntry> {
 		let bucket = &self.buckets[policy_idx];
 
 		if bucket.is_empty() {
@@ -368,7 +407,10 @@ impl Shard {
 				let evicted_size = evicted.size;
 				self.buckets[policy_idx].remove(&key);
 				self.size_current -= evicted_size;
-				return Some(evicted_size);
+				return Some(EvictedEntry {
+					key,
+					entry: evicted,
+				});
 			} else {
 				// Decrement frequency and advance hand
 				entry.frequency.fetch_sub(1, Ordering::Relaxed);
@@ -390,7 +432,10 @@ impl Shard {
 		let evicted_size = evicted.size;
 		self.buckets[policy_idx].remove(&key);
 		self.size_current -= evicted_size;
-		Some(evicted_size)
+		Some(EvictedEntry {
+			key,
+			entry: evicted,
+		})
 	}
 }
 
@@ -436,7 +481,7 @@ mod tests {
 		let key = make_key(1, CachePolicy::Standard);
 		let entry = make_entry(50, CachePolicy::Standard);
 
-		let (old, _evicted) = shard.insert(key.clone(), entry);
+		let (old, _stats, _evicted) = shard.insert(key.clone(), entry);
 		assert!(old.is_none());
 		assert!(shard.contains(&key));
 		assert_eq!(shard.len(), 1);
@@ -569,13 +614,13 @@ mod tests {
 		let entry = Entry::new(large_value, CachePolicy::Standard);
 		let entry_size = entry.size;
 
-		let (old, (num_evictions, _evicted_size)) = shard.insert(key.clone(), entry);
+		let (old, stats, _evicted) = shard.insert(key.clone(), entry);
 
 		// Should insert successfully
 		assert!(old.is_none());
 		assert!(shard.contains(&key));
 		assert_eq!(shard.len(), 1);
-		assert_eq!(num_evictions, 0); // No evictions in empty cache
+		assert_eq!(stats.count, 0); // No evictions in empty cache
 
 		// Size should exceed capacity (which is acceptable for a single oversized entry)
 		assert_eq!(shard.size_current, entry_size);
@@ -623,10 +668,10 @@ mod tests {
 		};
 		let big_entry = Entry::new(large_value, CachePolicy::Standard);
 
-		let (_old, (num_evictions, _evicted_size)) = shard.insert(big_key.clone(), big_entry);
+		let (_old, stats, _evicted) = shard.insert(big_key.clone(), big_entry);
 
 		// Should have triggered evictions (may hit retry limit before evicting all)
-		assert!(num_evictions > 0, "Expected some evictions but got none");
+		assert!(stats.count > 0, "Expected some evictions but got none");
 
 		// The oversized entry should be inserted
 		assert!(shard.contains(&big_key), "Oversized entry should be inserted");
