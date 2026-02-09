@@ -317,15 +317,18 @@ impl Shard {
 	}
 
 	/// Remove an entry by key.
-	pub fn remove(&mut self, key: &ErasedKey) -> Option<Entry> {
-		let entry = self.entries.remove(key)?;
+	///
+	/// Returns the actual stored key and entry, which may differ from the lookup key
+	/// when multiple key representations hash/compare as equal.
+	pub fn remove(&mut self, key: &ErasedKey) -> Option<(ErasedKey, Entry)> {
+		let (stored_key, entry) = self.entries.remove_entry(key)?;
 		let policy = entry.policy;
 		let size = entry.size;
 
-		self.buckets[policy as usize].remove(key);
+		self.buckets[policy as usize].remove(&stored_key);
 		self.size_current -= size;
 
-		Some(entry)
+		Some((stored_key, entry))
 	}
 
 	/// Check if shard contains a key.

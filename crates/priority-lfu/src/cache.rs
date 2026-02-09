@@ -473,7 +473,7 @@ impl<L: Lifecycle> Cache<L> {
 	///
 	/// # Lifecycle Hooks
 	///
-	/// Calls [`Lifecycle::on_remove`] with the removed key.
+	/// Calls [`Lifecycle::on_remove`] with the actual stored key (not the lookup key).
 	///
 	/// # Runtime Complexity
 	///
@@ -489,11 +489,9 @@ impl<L: Lifecycle> Cache<L> {
 		let shard_lock = self.get_shard(erased_key.hash);
 
 		let mut shard = shard_lock.write();
-		let entry = shard.remove(&erased_key)?;
+		let (stored_key, entry) = shard.remove(&erased_key)?;
 
-		// Release lock before calling lifecycle hooks
-		drop(shard);
-
+		// Update counters while still holding the lock to prevent race with clear()
 		self.current_size.fetch_sub(entry.size, Ordering::Relaxed);
 		self.entry_count.fetch_sub(1, Ordering::Relaxed);
 
@@ -501,8 +499,11 @@ impl<L: Lifecycle> Cache<L> {
 		#[cfg(feature = "metrics")]
 		self.removals.fetch_add(1, Ordering::Relaxed);
 
-		// Call lifecycle hook
-		self.lifecycle.on_remove(erased_key.data.as_ref());
+		// Release lock before calling lifecycle hooks
+		drop(shard);
+
+		// Call lifecycle hook with the actual stored key
+		self.lifecycle.on_remove(stored_key.data.as_ref());
 
 		entry.into_value::<K::Value>()
 	}
