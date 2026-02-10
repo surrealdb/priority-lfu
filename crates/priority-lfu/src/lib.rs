@@ -6,6 +6,7 @@ mod cache;
 mod deepsize;
 mod erased;
 mod guard;
+mod lifecycle;
 #[cfg(feature = "metrics")]
 mod metrics;
 mod shard;
@@ -15,6 +16,7 @@ pub use builder::CacheBuilder;
 pub use cache::Cache;
 pub use deepsize::{Context, DeepSizeOf};
 pub use guard::Guard;
+pub use lifecycle::{DefaultLifecycle, Lifecycle, TypedLifecycle};
 #[cfg(feature = "metrics")]
 pub use metrics::CacheMetrics;
 pub use priority_lfu_derive::*;

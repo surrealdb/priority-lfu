@@ -1,4 +1,5 @@
 use crate::cache::Cache;
+use crate::lifecycle::{DefaultLifecycle, Lifecycle};
 
 /// Builder for configuring a Cache.
 ///
@@ -9,6 +10,25 @@ use crate::cache::Cache;
 ///
 /// let cache = CacheBuilder::new(1024 * 1024 * 512) // 512 MB
 ///     .shards(128)
+///     .build();
+/// ```
+///
+/// # With Lifecycle Hooks
+///
+/// ```
+/// use std::any::Any;
+/// use priority_lfu::{CacheBuilder, Lifecycle};
+///
+/// struct MyLifecycle;
+///
+/// impl Lifecycle for MyLifecycle {
+///     fn on_evict(&self, key: &dyn Any) {
+///         println!("Entry evicted!");
+///     }
+/// }
+///
+/// let cache = CacheBuilder::new(1024 * 1024)
+///     .lifecycle(MyLifecycle)
 ///     .build();
 /// ```
 ///
@@ -24,20 +44,24 @@ use crate::cache::Cache;
 ///
 /// You can override this with [`shards()`], but the count may still be reduced
 /// if the capacity is too small to support the requested number.
-pub struct CacheBuilder {
+pub struct CacheBuilder<L: Lifecycle = DefaultLifecycle> {
 	max_size: usize,
 	shard_count: Option<usize>,
+	lifecycle: L,
 }
 
-impl CacheBuilder {
+impl CacheBuilder<DefaultLifecycle> {
 	/// Create a new builder with the given maximum size in bytes.
 	pub fn new(max_size_bytes: usize) -> Self {
 		Self {
 			max_size: max_size_bytes,
 			shard_count: None,
+			lifecycle: DefaultLifecycle,
 		}
 	}
+}
 
+impl<L: Lifecycle> CacheBuilder<L> {
 	/// Set the number of shards.
 	///
 	/// More shards reduce contention but increase memory overhead.
@@ -53,16 +77,47 @@ impl CacheBuilder {
 		self
 	}
 
+	/// Set the lifecycle hooks.
+	///
+	/// Lifecycle hooks are called when entries are evicted, removed, or cleared.
+	/// See [`Lifecycle`] for details.
+	///
+	/// # Example
+	///
+	/// ```
+	/// use std::any::Any;
+	/// use priority_lfu::{CacheBuilder, Lifecycle};
+	///
+	/// struct MyLifecycle;
+	///
+	/// impl Lifecycle for MyLifecycle {
+	///     fn on_evict(&self, _key: &dyn Any) {
+	///         println!("Entry evicted!");
+	///     }
+	/// }
+	///
+	/// let cache = CacheBuilder::new(1024)
+	///     .lifecycle(MyLifecycle)
+	///     .build();
+	/// ```
+	pub fn lifecycle<L2: Lifecycle>(self, lifecycle: L2) -> CacheBuilder<L2> {
+		CacheBuilder {
+			max_size: self.max_size,
+			shard_count: self.shard_count,
+			lifecycle,
+		}
+	}
+
 	/// Build the cache with the configured settings.
-	pub fn build(self) -> Cache {
+	pub fn build(self) -> Cache<L> {
 		match self.shard_count {
-			Some(count) => Cache::with_shards(self.max_size, count),
-			None => Cache::new(self.max_size),
+			Some(count) => Cache::with_shards_and_lifecycle(self.max_size, count, self.lifecycle),
+			None => Cache::with_lifecycle(self.max_size, self.lifecycle),
 		}
 	}
 }
 
-impl Default for CacheBuilder {
+impl Default for CacheBuilder<DefaultLifecycle> {
 	/// Create a builder with default settings and 1GB capacity.
 	fn default() -> Self {
 		Self::new(1024 * 1024 * 1024) // 1 GB
