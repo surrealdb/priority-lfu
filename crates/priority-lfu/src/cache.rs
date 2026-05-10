@@ -508,20 +508,25 @@ impl<L: Lifecycle> Cache<L> {
 		entry.into_value::<K::Value>()
 	}
 
-	/// Check if a key exists (zero allocation).
+	/// Check if a key exists (zero allocation, no side effects).
+	///
+	/// Unlike [`get`](Self::get) / [`get_clone`](Self::get_clone), this method does NOT
+	/// mark the entry as accessed: it does not set the clock bit or increment the
+	/// frequency counter. Use it when you only need to know whether a key is present
+	/// and do not want to influence eviction decisions.
 	pub fn contains<K: CacheKey>(&self, key: &K) -> bool {
 		let key_ref = ErasedKeyRef::new(key);
 		let shard_lock = self.get_shard(key_ref.hash);
 		let shard = shard_lock.read();
 
-		// Use get_ref for zero-allocation lookup
-		shard.get_ref(&key_ref).is_some()
+		shard.contains_ref(&key_ref)
 	}
 
-	/// Check if a borrowed lookup key exists (zero allocation).
+	/// Check if a borrowed lookup key exists (zero allocation, no side effects).
 	///
 	/// This method allows checking existence using a borrowed key type `Q` that
-	/// implements `CacheKeyLookup<K>`, enabling zero-allocation lookups.
+	/// implements `CacheKeyLookup<K>`, enabling zero-allocation lookups. Like
+	/// [`contains`](Self::contains), this does not mark the entry as accessed.
 	///
 	/// # Example
 	///
@@ -538,8 +543,7 @@ impl<L: Lifecycle> Cache<L> {
 		let shard_lock = self.get_shard(key_ref.hash);
 		let shard = shard_lock.read();
 
-		// Use get_ref_by for zero-allocation lookup
-		shard.get_ref_by(&key_ref).is_some()
+		shard.contains_ref_by(&key_ref)
 	}
 
 	/// Current total size in bytes.
@@ -569,19 +573,31 @@ impl<L: Lifecycle> Cache<L> {
 	///
 	/// This method acquires a write lock on each shard sequentially and clears
 	/// all data structures (HashMap and IndexMaps).
+	///
+	/// # Concurrency
+	///
+	/// Shards are drained sequentially. The size/count atomics are decremented by the
+	/// drained amount under each shard lock (rather than reset to zero at the end), so
+	/// any concurrent insert into an already-drained shard remains correctly accounted
+	/// for in `size()` and `len()`. Metrics counters are reset at the end; concurrent
+	/// operations during clear may have their metric updates retained — this is
+	/// acceptable since metrics are observational.
 	pub fn clear(&self) {
-		// Collect all entries from all shards, then call lifecycle hooks outside of locks
+		// Collect all entries from all shards, then call lifecycle hooks outside of locks.
 		let mut all_entries = Vec::new();
 
 		for shard_lock in &self.shards {
 			let mut shard = shard_lock.write();
-			all_entries.extend(shard.drain());
+			let (entries, drained_size, drained_count) = shard.drain();
+			// Update global atomics while still holding the shard lock so a concurrent
+			// insert on this shard can't slip in between the drain and the atomic update.
+			self.current_size.fetch_sub(drained_size, Ordering::Relaxed);
+			self.entry_count.fetch_sub(drained_count, Ordering::Relaxed);
+			all_entries.extend(entries);
 		}
 
-		self.current_size.store(0, Ordering::Relaxed);
-		self.entry_count.store(0, Ordering::Relaxed);
-
-		// Reset all metrics
+		// Reset all metrics. Concurrent ops may add to these after we reset; that's
+		// acceptable because metrics are observational, not authoritative.
 		#[cfg(feature = "metrics")]
 		{
 			self.hits.store(0, Ordering::Relaxed);

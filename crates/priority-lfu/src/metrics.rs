@@ -21,7 +21,7 @@
 #[non_exhaustive]
 #[derive(Debug, Clone, Default)]
 pub struct CacheMetrics {
-	/// Number of successful cache lookups (get/get_arc).
+	/// Number of successful cache lookups (`get`, `get_clone`, and their `_by` variants).
 	pub hits: u64,
 	/// Number of failed cache lookups (key not found).
 	pub misses: u64,

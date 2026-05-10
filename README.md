@@ -6,7 +6,7 @@ A high-performance, concurrent, in-memory cache with **weight-stratified clock**
 
 - 🚀 **High Performance**: Sub-microsecond reads with minimal overhead
 - 📏 **Size-Bounded**: Memory limits in bytes, not item count
-- ⚖️ **Policy-Based Eviction**: Prioritize important items with 4 eviction tiers
+- ⚖️ **Policy-Based Eviction**: Prioritize important items with 3 eviction tiers (Critical, Standard, Volatile)
 - 🎯 **Weight-Stratified Clock**: Predictable priority-based eviction with frequency tracking
 - 🔒 **Thread-Safe**: Fine-grained sharding for low contention
 - 🔄 **Async-Friendly**: Safe to use in async/await contexts
@@ -339,10 +339,6 @@ This project is licensed under the MIT License.
 ## Contributing
 
 For maintainers releasing new versions, see [RELEASE.md](RELEASE.md) for the release process.
-
-## Design
-
-For detailed design documentation, see [design/spec.md](design/spec.md).
 
 ## References
 

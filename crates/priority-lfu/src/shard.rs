@@ -118,26 +118,30 @@ impl PolicyBucket {
 
 	/// Remove a key from the bucket using O(1) swap_remove.
 	///
-	/// When swap_remove is used, the last element is moved to fill the gap.
-	/// We must adjust the hand position accordingly:
-	/// - If we removed before the hand, decrement hand
-	/// - If we removed at the old last position and hand pointed there, it now points to removed
-	///   slot
+	/// `IndexMap::swap_remove` removes the entry at `removed_idx` and, if it was not the last
+	/// entry, moves the entry from the final position into the vacated slot. All other indices
+	/// remain unchanged. The hand is adjusted to maintain a valid position:
+	///
+	/// - If the bucket is now empty, reset the hand to 0.
+	/// - If the hand pointed at the final position and the removal happened elsewhere, the entry
+	///   it referenced has moved to `removed_idx`, so the hand follows it.
+	/// - If the hand pointed at the position that is now out of bounds (the old final index),
+	///   wrap it to 0.
+	/// - Otherwise the hand stays put. Note that when `self.hand == removed_idx` (and it was not
+	///   the final position), the slot now holds a different (moved-in) entry that will simply be
+	///   considered in the next sweep — this is acceptable for an approximate clock sweep.
 	fn remove(&mut self, key: &ErasedKey) -> bool {
 		let old_len = self.list.len();
 		if let Some((removed_idx, _, _)) = self.list.swap_remove_full(key) {
 			let new_len = self.list.len();
 			if new_len == 0 {
 				self.hand = 0;
-			} else if removed_idx < self.hand {
-				// Removed before hand, decrement to stay on same logical entry
-				self.hand -= 1;
 			} else if self.hand == old_len - 1 && removed_idx != old_len - 1 {
-				// Hand was pointing to the last element, which got swapped to removed_idx
+				// Hand was pointing to the last element, which got swapped to removed_idx.
 				self.hand = removed_idx;
-			}
-			// Keep hand in bounds (handles edge cases)
-			if self.hand >= new_len && new_len > 0 {
+			} else if self.hand >= new_len {
+				// Defensive: hand was at the old final index and we removed exactly that index
+				// (self.hand == removed_idx == old_len - 1), so the position no longer exists.
 				self.hand = 0;
 			}
 			true
@@ -288,6 +292,28 @@ impl Shard {
 		Some(entry)
 	}
 
+	/// Check whether the shard contains an entry for the given key (zero allocation,
+	/// no side effects on clock bit or frequency).
+	pub fn contains_ref<K: crate::traits::CacheKey>(&self, key_ref: &ErasedKeyRef<K>) -> bool {
+		self.entries
+			.raw_entry()
+			.from_hash(key_ref.hash, |stored_key| key_ref.equals(stored_key))
+			.is_some()
+	}
+
+	/// Check whether the shard contains an entry for the given borrowed lookup key
+	/// (zero allocation, no side effects on clock bit or frequency).
+	pub fn contains_ref_by<K, Q>(&self, key_ref: &ErasedKeyLookup<K, Q>) -> bool
+	where
+		K: CacheKey,
+		Q: CacheKeyLookup<K> + ?Sized,
+	{
+		self.entries
+			.raw_entry()
+			.from_hash(key_ref.hash, |stored_key| key_ref.equals(stored_key))
+			.is_some()
+	}
+
 	/// Get an entry by borrowed lookup key (zero allocation).
 	///
 	/// This allows looking up entries using a borrowed key type `Q` that implements
@@ -355,17 +381,27 @@ impl Shard {
 		self.size_current = 0;
 	}
 
-	/// Drain all entries, returning them for lifecycle callbacks.
-	pub fn drain(&mut self) -> impl Iterator<Item = EvictedEntry> + '_ {
+	/// Drain all entries, returning them along with the total drained size and count.
+	///
+	/// Returning the captured size/count atomically (under the same lock that drains the
+	/// shard) lets the caller update global atomics with `fetch_sub` instead of `store(0)`,
+	/// which would otherwise race with concurrent inserts on already-drained shards.
+	pub fn drain(&mut self) -> (Vec<EvictedEntry>, usize, usize) {
+		let drained_size = self.size_current;
+		let drained_count = self.entries.len();
+		let entries: Vec<EvictedEntry> = self
+			.entries
+			.drain()
+			.map(|(key, entry)| EvictedEntry {
+				key,
+				entry,
+			})
+			.collect();
 		for bucket in &mut self.buckets {
 			bucket.clear();
 		}
 		self.size_current = 0;
-
-		self.entries.drain().map(|(key, entry)| EvictedEntry {
-			key,
-			entry,
-		})
+		(entries, drained_size, drained_count)
 	}
 
 	/// Try to evict one entry from a specific bucket using clock algorithm.
@@ -686,5 +722,140 @@ mod tests {
 			initial_len + 1,
 			shard.len()
 		);
+	}
+
+	#[test]
+	fn test_policy_bucket_remove_hand_unaffected_when_remove_before_hand() {
+		// swap_remove does NOT shift indices. If hand points past the removed slot
+		// (but not at the final position), the entry there stays at the same index.
+		let mut bucket = PolicyBucket::new();
+		for i in 0..5 {
+			bucket.insert(make_key(i, CachePolicy::Standard));
+		}
+		bucket.hand = 3;
+		// Remember the key at hand position so we can verify the hand still points to it.
+		let key_at_hand = bucket.list.get_index(3).expect("entry at hand").0.clone();
+
+		// Remove index 1 (before hand, not the last index)
+		bucket.remove(&make_key(1, CachePolicy::Standard));
+		// Hand should still point to the same logical entry (which is still at index 3).
+		assert_eq!(bucket.hand, 3, "hand should not move when removing before it");
+		let current_key_at_hand =
+			bucket.list.get_index(bucket.hand).expect("entry at hand").0.clone();
+		assert_eq!(
+			current_key_at_hand, key_at_hand,
+			"hand should still reference the same logical entry"
+		);
+	}
+
+	#[test]
+	fn test_policy_bucket_remove_hand_follows_swapped_element() {
+		// If the hand is at the final index and we remove a non-final index,
+		// the final entry gets swapped into the removed slot. The hand must follow it.
+		let mut bucket = PolicyBucket::new();
+		for i in 0..5 {
+			bucket.insert(make_key(i, CachePolicy::Standard));
+		}
+		bucket.hand = 4; // last index
+		let key_at_hand = bucket.list.get_index(4).expect("entry at hand").0.clone();
+
+		// Remove index 1; the entry previously at index 4 is moved to index 1.
+		bucket.remove(&make_key(1, CachePolicy::Standard));
+		assert_eq!(bucket.hand, 1, "hand should follow the swapped element");
+		let current_key_at_hand =
+			bucket.list.get_index(bucket.hand).expect("entry at hand").0.clone();
+		assert_eq!(
+			current_key_at_hand, key_at_hand,
+			"hand should follow the same logical entry after swap"
+		);
+	}
+
+	#[test]
+	fn test_policy_bucket_remove_hand_wraps_when_final_index_removed() {
+		// If the hand is at the final index and we remove that exact entry,
+		// the bucket shrinks and the hand becomes out of bounds; it must wrap to 0.
+		let mut bucket = PolicyBucket::new();
+		for i in 0..5 {
+			bucket.insert(make_key(i, CachePolicy::Standard));
+		}
+		bucket.hand = 4;
+		bucket.remove(&make_key(4, CachePolicy::Standard));
+		assert_eq!(bucket.hand, 0);
+		assert_eq!(bucket.list.len(), 4);
+	}
+
+	#[test]
+	fn test_policy_bucket_remove_hand_unchanged_when_removed_at_hand_not_last() {
+		// When self.hand == removed_idx (and it's not the last), the entry that was at
+		// the final position is moved into the hand's slot. Hand stays put — the next
+		// sweep will consider the newly-arrived entry.
+		let mut bucket = PolicyBucket::new();
+		for i in 0..5 {
+			bucket.insert(make_key(i, CachePolicy::Standard));
+		}
+		bucket.hand = 1;
+		bucket.remove(&make_key(1, CachePolicy::Standard));
+		assert_eq!(bucket.hand, 1, "hand stays put; slot now holds the moved-in entry");
+		assert_eq!(bucket.list.len(), 4);
+	}
+
+	#[test]
+	fn test_policy_bucket_remove_hand_unchanged_when_removed_after_hand() {
+		// Removing an entry past the hand (but not the final index) leaves the hand alone.
+		let mut bucket = PolicyBucket::new();
+		for i in 0..5 {
+			bucket.insert(make_key(i, CachePolicy::Standard));
+		}
+		bucket.hand = 1;
+		let key_at_hand = bucket.list.get_index(1).expect("entry at hand").0.clone();
+		bucket.remove(&make_key(3, CachePolicy::Standard));
+		assert_eq!(bucket.hand, 1);
+		let current_key_at_hand =
+			bucket.list.get_index(bucket.hand).expect("entry at hand").0.clone();
+		assert_eq!(current_key_at_hand, key_at_hand);
+	}
+
+	#[test]
+	fn test_policy_bucket_remove_hand_resets_when_bucket_empties() {
+		let mut bucket = PolicyBucket::new();
+		bucket.insert(make_key(1, CachePolicy::Standard));
+		bucket.hand = 0;
+		bucket.remove(&make_key(1, CachePolicy::Standard));
+		assert_eq!(bucket.hand, 0);
+		assert!(bucket.is_empty());
+	}
+
+	#[test]
+	fn test_shard_remove_keeps_eviction_correct_after_repeated_removes() {
+		// Regression test: with the buggy `hand -= 1` adjustment, removing entries
+		// "before" the hand caused the clock hand to walk backwards, eventually
+		// pointing at an invalid or wrong logical entry. Ensure eviction still
+		// works after a sequence of removes interleaved with eviction.
+		let mut shard = Shard::new(500);
+		for i in 0..10 {
+			let key = make_key(i, CachePolicy::Standard);
+			let entry = make_entry(40, CachePolicy::Standard);
+			shard.insert(key, entry);
+		}
+		// Remove a few from the front.
+		for i in 0..3 {
+			let key = make_key(i, CachePolicy::Standard);
+			shard.remove(&key);
+		}
+		// Insert enough new entries to force eviction.
+		for i in 100..130 {
+			let key = make_key(i, CachePolicy::Standard);
+			let entry = make_entry(40, CachePolicy::Standard);
+			shard.insert(key, entry);
+		}
+		// Cache should still respect capacity.
+		assert!(shard.size_current <= shard.size_capacity + 40, "size honors capacity");
+		// And entries should still be retrievable / removable without panic.
+		for i in 100..110 {
+			let key = make_key(i, CachePolicy::Standard);
+			// remove may or may not find the key depending on eviction order,
+			// but it must never panic and must keep counts coherent.
+			let _ = shard.remove(&key);
+		}
 	}
 }
