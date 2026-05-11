@@ -756,9 +756,8 @@ fn test_clear_len_consistent_with_concurrent_inserts() {
 		// All writer keys should still be in their shards (no eviction occurs at this
 		// capacity). Count the actual survivors via contains(), then verify len()
 		// matches. With the previous bug, len() could be much lower than actual.
-		let actual = (0..WRITER_INSERTS)
-			.filter(|i| cache.contains(&IntKey(WRITER_KEY_BASE + *i)))
-			.count();
+		let actual =
+			(0..WRITER_INSERTS).filter(|i| cache.contains(&IntKey(WRITER_KEY_BASE + *i))).count();
 		let reported_len = cache.len();
 
 		assert_eq!(
