@@ -708,6 +708,111 @@ fn test_frequency_decays_during_sweep() {
 	assert!(remaining < 20, "Some StandardKey entries should be evicted");
 }
 
+#[test]
+fn test_clear_len_consistent_with_concurrent_inserts() {
+	use std::sync::Barrier;
+
+	// Regression test: previously, `clear()` did `entry_count.store(0)` and
+	// `current_size.store(0)` *after* releasing every shard lock. A concurrent
+	// insert that updated the atomics *before* the final store would have its
+	// contribution wiped out, leaving `len()` and `size()` reporting less than
+	// what the shards actually contained.
+	//
+	// We run many iterations and use a barrier to maximise the chance of the
+	// clear() and writer overlap. After both finish, `len()` MUST equal the
+	// number of writer entries that actually survive in the shards.
+	const ITERS: usize = 20;
+	const WRITER_INSERTS: u64 = 2000;
+	const WRITER_KEY_BASE: u64 = 100_000;
+
+	for _ in 0..ITERS {
+		// Plenty of capacity so the writer's inserts don't cause evictions.
+		let cache = Arc::new(Cache::new(4 * 1024 * 1024));
+
+		// Pre-populate with keys disjoint from the writer's range so clear()
+		// has work to do.
+		for i in 0..500 {
+			cache.insert(IntKey(i), IntValue(i as i64));
+		}
+
+		// Barrier coordinates the writer with clear() so both start near-simultaneously.
+		let barrier = Arc::new(Barrier::new(2));
+
+		let writer = {
+			let cache = cache.clone();
+			let barrier = barrier.clone();
+			thread::spawn(move || {
+				barrier.wait();
+				for i in 0..WRITER_INSERTS {
+					cache.insert(IntKey(WRITER_KEY_BASE + i), IntValue(i as i64));
+				}
+			})
+		};
+
+		barrier.wait();
+		cache.clear();
+		writer.join().expect("writer thread should not panic");
+
+		// All writer keys should still be in their shards (no eviction occurs at this
+		// capacity). Count the actual survivors via contains(), then verify len()
+		// matches. With the previous bug, len() could be much lower than actual.
+		let actual =
+			(0..WRITER_INSERTS).filter(|i| cache.contains(&IntKey(WRITER_KEY_BASE + *i))).count();
+		let reported_len = cache.len();
+
+		assert_eq!(
+			reported_len, actual,
+			"len() = {reported_len} disagrees with actual survivors = {actual} — \
+			 global entry_count atomic out of sync with shards (race in clear())"
+		);
+
+		// And no underflow on size (a `store(0)` after `fetch_add` would wipe state;
+		// a subsequent `fetch_sub` could underflow). usize::MAX/2 is a generous bound.
+		assert!(cache.size() < usize::MAX / 2, "size underflow detected: {}", cache.size());
+	}
+}
+
+#[test]
+fn test_contains_does_not_affect_eviction() {
+	// `contains()` must not mark an entry as accessed: it should not set the clock
+	// bit or bump the frequency. Otherwise, code that polls for existence (e.g.
+	// "do I need to refresh this?") would keep otherwise-unused entries alive and
+	// distort the cache's view of which keys are hot.
+	//
+	// Test strategy: put two entries in the same bucket. Query one via `get`
+	// (which legitimately bumps clock_bit/freq) and the other via `contains`.
+	// Then force exactly one eviction. The clock sweep should:
+	//   - Find entry 1 with clock_bit=true (from get) → clear, advance.
+	//   - Find entry 2 with clock_bit=false, freq=0 → EVICT.
+	//
+	// If `contains` had side effects, entry 2's clock_bit would also be set,
+	// and the sweep would walk past it and evict a different entry instead.
+
+	// IntValue deep_size = 8 bytes. Capacity 40 = exactly 5 entries.
+	let cache = Cache::with_shards(40, 1);
+	for i in 1..=5u64 {
+		cache.insert(VolatileKey(i), IntValue(i as i64));
+	}
+	assert_eq!(cache.len(), 5);
+
+	for _ in 0..50 {
+		let _ = cache.get_clone(&VolatileKey(1));
+	}
+	for _ in 0..50 {
+		let _ = cache.contains(&VolatileKey(2));
+	}
+
+	// Insert one more (8 bytes), forcing exactly one eviction.
+	cache.insert(VolatileKey(100), IntValue(100));
+
+	assert!(cache.contains(&VolatileKey(1)), "frequently-gotten entry should survive");
+	assert!(
+		!cache.contains(&VolatileKey(2)),
+		"entry queried only via contains() should be evictable; \
+		 contains() may be bumping clock_bit/frequency"
+	);
+}
+
 // ============================================================================
 // Metrics Tests
 // ============================================================================
